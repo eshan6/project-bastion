@@ -19,7 +19,7 @@ This repository contains the **ingestion + extraction pipeline** that feeds the 
 - **Pre-incorporation, Phase 1 build.**
 - **Lighthouse** (the sister product, a Palantir Gotham-style ISR platform) is on pause. Bastion builds from scratch — no shared infra is assumed for Phase 1.
 - **Advisor review is out of scope for Phase 1.** Public data is the realism oracle.
-- **Extraction boundaries:** legality only. Scrape everything public. Paid subscriptions (Janes) are acceptable if they raise the realism floor.
+- **Extraction boundaries:** legality only. Scrape everything public. Paid subscriptions are not in scope for Phase 1 (no money to spend).
 - **No classified data, no offensive cyber, no offensive autonomy.** Bastion is sustainment — administrative, defensive, dual-use.
 
 ---
@@ -30,17 +30,17 @@ Phase 1 is structured as four blocks. Each block ends with a working artifact.
 
 ### Block A — Public data + ontology (Weeks 5–7)
 
-- **Week 5:** Catalogue ~80–120 public sources. Stand up scraping stack (Playwright for JS-heavy pages, scrapy for crawls, BeautifulSoup4 for one-off parsing). Raw → curated layer in Postgres.
-- **Week 6:** Bulk extract. PDF parsing via `pdfplumber` primary + Nougat for math/tables fallback. Geocode locations. Resolve entities (units, places, vehicles). Pull Sentinel-2 snow time-series for strategic passes (Zoji La, Sela, Khardung La, etc.).
+- **Week 5:** Catalogue ~80–120 public sources. Stand up scraping stack (httpx static, Playwright dynamic, streaming bulk). Raw → curated layer in Postgres. *(Done.)*
+- **Week 6:** Bulk extract. PDF parsing via `pdfplumber` primary + OCR fallback for scans. Geocode locations. Resolve entities (units, places, vehicles). Pull Sentinel-2 snow time-series for strategic passes (Zoji La, Sela, Khardung La, etc.).
 - **Week 7:** Lock the ontology in Postgres + PostGIS. Build the curated layer via reproducible SQL.
 
-**Source categories to cover in Block A:**
+**Source categories covered in Block A:**
 - *Geo / infrastructure:* Bhuvan, OpenStreetMap, SRTM/ASTER DEM, Sentinel-2, BRO bulletins, Project Vartak / Himank / Beacon / Deepak / Udayak / Setuk pages.
-- *Weather + closures:* IMD daily bulletins, news archives (The Hindu, Indian Express, Times of India, Hindustan Times, Tribune, Greater Kashmir, Kashmir Observer).
-- *ORBAT:* Janes, IISS, Globalsecurity, FAS, OrBat, Damien Symon's OSINT, Wikipedia.
-- *Scales / consumption:* RTI/CIC archives, CAG reports, PRS + Lok Sabha Defence Committee reports, IDR / Force / SP's / DNI, DPP / DAP.
-- *Vehicles:* Tata, Ashok Leyland, CAG audits, MoD annual reports.
-- *Operational tempo:* PIB releases.
+- *Weather + closures:* IMD daily bulletins, news archives (The Hindu, Indian Express, Times of India, Hindustan Times, Tribune, Greater Kashmir, Kashmir Observer, Reach Ladakh).
+- *ORBAT:* IISS, Globalsecurity, FAS, OrBat, Damien Symon's OSINT, Wikipedia.
+- *Scales / consumption:* RTI/CIC archives, CAG reports, PRS + Lok Sabha Defence Committee reports, IDR / Force / SP's, DPP / DAP.
+- *Vehicles:* Tata, Ashok Leyland, Mahindra, BEML, HAL, CAG audits, MoD annual reports.
+- *Operational tempo:* PIB releases, MEA briefings, ADGPI archive, GDELT/ACLED India.
 
 ### Block B — Generator fitting (Weeks 8–9)
 
@@ -107,8 +107,8 @@ Optimization: **OR-Tools MIP**, stateful planner with checkpoint/restart for liv
 ## 6. Stack — settled decisions
 
 - **Language:** Python 3.11+ for everything backend. TypeScript + React for the demo UI.
-- **DB:** PostgreSQL 16 + PostGIS (geospatial) + pg_trgm (fuzzy match). One instance, two schemas (`bastion_provenance` and `bastion_curated`).
-- **Scraping:** `httpx` for plain HTTP, `Playwright` for JS-rendered pages, `scrapy` for spiders. `BeautifulSoup4` + `lxml` for one-off HTML parsing.
+- **DB:** PostgreSQL 16 + PostGIS (geospatial) + pg_trgm (fuzzy match). One instance, three schemas (`bastion_raw`, `bastion_provenance`, `bastion_curated`).
+- **Scraping:** `httpx` for plain HTTP, `Playwright` for JS-rendered pages. Streaming bulk via httpx. `BeautifulSoup4` + `lxml` for HTML parsing.
 - **PDF:** `pdfplumber` primary, `pytesseract` + `pdf2image` as OCR fallback for scanned docs.
 - **ML:** `xgboost`, `scikit-learn`, `lifelines` (for survival), `MLflow` (self-hosted) for tracking.
 - **Optimization:** `ortools`.
@@ -121,39 +121,16 @@ Optimization: **OR-Tools MIP**, stateful planner with checkpoint/restart for liv
 
 ## 7. Repository structure
 
-```
-project-bastion/
-├── CLAUDE.md                      # this file
-├── README.md
-├── bastion/
-│   ├── __init__.py
-│   ├── cli.py                     # click CLI: fetch, queue, run-due, extract
-│   ├── core/
-│   │   ├── __init__.py
-│   │   ├── extractor_base.py      # abstract Extractor + ExtractedClaim dataclass
-│   │   └── db_extras.py           # idempotent claim+evidence_link writers
-│   ├── extractors/
-│   │   ├── __init__.py
-│   │   ├── pdf.py                 # PdfExtractor (pdfplumber + OCR fallback)
-│   │   └── html.py                # HtmlExtractor (BeautifulSoup+lxml)
-│   └── sources/
-│       ├── __init__.py            # EXTRACTOR_BY_SOURCE registry
-│       ├── imd_daily_bulletin.py  # IMD weather bulletin parser
-│       └── wikipedia_orbat.py     # Wikipedia Indian Army formation parser
-└── tests/
-    ├── __init__.py
-    └── thursday_e2e_test.py       # end-to-end pipeline test with embedded PG
-```
+See `README.md` for the canonical tree. Key paths:
 
-**Modules expected but not yet in this repo (build them when needed, do not invent paths):**
+- `bastion/sql/` — schema and catalogue DDL
+- `bastion/core/` — base classes (Scraper, Extractor) and helpers (config, db, blob, ratelimit)
+- `bastion/scrapers/` — concrete scrapers (Static, Dynamic, Bulk)
+- `bastion/extractors/` — content-type bases (PDF, HTML)
+- `bastion/sources/` — per-source modules with parsing logic
+- `tests/` — embedded-Postgres e2e tests
 
-- `bastion/core/db.py` — scraper-side DB helpers (`fetch_source`, `list_due_sources`, `fetch_artifact`).
-- `bastion/core/config.py` — `get_config()` returning DSN, blob root, etc.
-- `bastion/core/blob.py` — `read_blob(path)` content-addressed storage reader.
-- `bastion/scrapers/` — `get_scraper_class(name)` registry; HTTP/Playwright scraper classes.
-- `bastion/sql/` — `01_sources_schema.sql`, `02_sources_catalogue.sql`, `03_sources_catalogue_part2_and_views.sql`.
-
-When you build any of these, place them where the imports already point — do not relocate.
+When you build new modules, place them where the imports already point — do not relocate.
 
 ---
 
@@ -168,7 +145,7 @@ These are the operating principles for any Claude session on this project.
 5. **Foundry data engineer mindset for any data work.** Interrogate the data, do not describe it. Pipelines, ontologies, object relationships. Surface non-obvious patterns. Prioritize insights that change a decision.
 6. **Architectural philosophy:** build toward Palantir parity, right-sized for the current stage. Map every feature back to the Block plan in §3.
 7. **Right-sized over over-engineered.** No full RDF graph databases when Postgres + recursive CTEs work. No infinite abstraction.
-8. **Provenance is structurally inescapable.** Extractors inherit from `bastion.core.extractor_base.Extractor` and write claims via `db_extras.insert_claim_with_evidence`. Do not bypass these. Idempotency is a property of the system, not a discipline.
+8. **Provenance is structurally inescapable.** Scrapers inherit from `bastion.core.scraper_base.Scraper`; extractors inherit from `bastion.core.extractor_base.Extractor`. Both write provenance via base-class methods that subclasses cannot bypass. Idempotency is a property of the system, not a discipline.
 9. **Notebook organization** (when notebooks are used): latest cell at top (descending order); execution order top-to-bottom; re-run safe.
 
 ---
@@ -183,15 +160,17 @@ These are decisions already made in prior planning. Treat as fixed unless the us
 - Architecture mirrors the Palantir ontology pattern, right-sized.
 - Procurement lanes: iDEX Open Challenge AND direct Army outreach via QMG/MGS branches, run in parallel.
 - 18-month budget envelope: ₹1.25–1.70 Cr.
+- No paid subscriptions in Phase 1 (no Janes, no S3). Local MinIO/disk for blobs.
+- robots.txt is intentionally ignored. Throttle aggressively per source instead.
 
 ---
 
 ## 10. Where to start in a fresh session
 
 1. Read this file end-to-end.
-2. Skim `bastion/core/extractor_base.py` and `bastion/core/db_extras.py` — they define the contract every extractor honors.
+2. Skim `bastion/core/scraper_base.py` and `bastion/core/extractor_base.py` — they define the contracts every subclass honors.
 3. Skim `bastion/extractors/pdf.py` and `bastion/extractors/html.py` — content-type base classes.
 4. Look at `bastion/sources/imd_daily_bulletin.py` and `bastion/sources/wikipedia_orbat.py` as reference implementations.
-5. Run `tests/thursday_e2e_test.py` mentally — it shows the full pipeline in one file (embedded Postgres → schema apply → synthetic artifacts → extractor runs → lineage verification → idempotency check).
+5. Run `tests/wednesday_e2e_test.py` and `tests/thursday_e2e_test.py` mentally — they show the full pipeline in two files (embedded Postgres → schema apply → fetch / synthetic artifacts → extractor runs → lineage verification → idempotency check).
 
 Anything you build should look like the existing code. Anything that does not should be justified before being written.
