@@ -1,0 +1,33 @@
+[project]
+name = "bastion"
+version = "0.1.0"
+description = "Project Bastion — predictive military sustainment platform (Silverpot Defence Technologies)"
+requires-python = ">=3.11"
+dependencies = [
+    "psycopg[binary]>=3.2",
+    "httpx>=0.27",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "tenacity>=8.2",
+    "structlog>=24.1",
+    "python-dotenv>=1.0",
+    "click>=8.1",
+    "pyyaml>=6.0",
+    "pdfplumber>=0.11",
+    "reportlab>=4.0",
+]
+
+[project.optional-dependencies]
+dynamic = ["playwright>=1.45"]
+ocr = ["pytesseract>=0.3.10", "pdf2image>=1.17"]
+test = ["pgserver>=0.1", "pytest>=8.0"]
+
+[project.scripts]
+bastion = "bastion.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["bastion"]

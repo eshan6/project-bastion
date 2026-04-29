@@ -1,23 +1,18 @@
 """
 Thursday e2e test: extractor pipeline.
 
-Scope:
-1. Stand up embedded Postgres (same pattern as Wednesday).
-2. Apply schema + catalogue.
-3. Build synthetic fixtures:
-   - IMD-format daily bulletin PDF (using reportlab) with realistic
-     synoptic summary + station observations for Leh/Kargil/Drass.
-   - Wikipedia-format HTML page for "XIV Corps (India)".
-4. Insert these as raw_artifacts manually (skipping fetch — the
-   scraper layer was proven Wednesday).
-5. Run the extractors via EXTRACTOR_BY_SOURCE.
-6. Verify claims rows + evidence_links rows + v_claim_lineage view.
-7. Verify idempotency: re-run the extractor, no new claim rows.
+1. Embedded Postgres + schema + catalogue.
+2. Synthetic IMD bulletin PDF (reportlab) and Wikipedia HTML fixture.
+3. Insert as raw_artifacts directly (skipping fetch — proven Wednesday).
+4. Run extractors.
+5. Verify claims + evidence_links + v_claim_lineage.
+6. Re-run → 0 new claims (idempotency).
 
-The fixtures are deliberately structured to look like real IMD/Wiki
-output so the extractor's regex paths are genuinely exercised.
+Run from repo root:
+    python tests/thursday_e2e_test.py
 """
 from __future__ import annotations
+import hashlib
 import os
 import re
 import sys
@@ -28,6 +23,11 @@ import pgserver
 import psycopg
 from psycopg.rows import dict_row
 
+# Repo-relative imports
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SQL_DIR = REPO_ROOT / "bastion" / "sql"
+sys.path.insert(0, str(REPO_ROOT))
+
 print("=" * 72)
 print("THURSDAY E2E TEST — Bastion extractor pipeline")
 print("=" * 72)
@@ -36,21 +36,19 @@ work = tempfile.mkdtemp(prefix="bastion_thu_")
 blob_root = Path(work) / "blobs"
 blob_root.mkdir()
 
-# ------- Embedded Postgres ---------------------------------------------
-
 print("\n[1/8] starting embedded postgres...")
 srv = pgserver.get_server(str(Path(work) / "pg"), cleanup_mode="stop")
 dsn = srv.get_uri()
 os.environ["BASTION_DB_DSN"] = dsn
 os.environ["BASTION_BLOB_ROOT"] = str(blob_root)
-sys.path.insert(0, "/home/claude/bastion/scrapers")
 
-# ------- Apply schema & catalogue --------------------------------------
+from bastion.core.config import reset_config_for_tests
+reset_config_for_tests()
 
 print("\n[2/8] applying schema + catalogue...")
-schema_sql = Path("/home/claude/bastion/01_sources_schema.sql").read_text()
-catalogue_p1 = Path("/home/claude/bastion/02_sources_catalogue.sql").read_text()
-catalogue_p2 = Path("/home/claude/bastion/03_sources_catalogue_part2_and_views.sql").read_text()
+schema_sql = (SQL_DIR / "01_sources_schema.sql").read_text()
+catalogue_p1 = (SQL_DIR / "02_sources_catalogue.sql").read_text()
+catalogue_p2 = (SQL_DIR / "03_sources_catalogue_part2_and_views.sql").read_text()
 
 schema_sql = re.sub(r"CREATE EXTENSION IF NOT EXISTS postgis;", "-- skipped postgis", schema_sql)
 schema_sql = re.sub(r"CREATE EXTENSION IF NOT EXISTS pg_trgm;.*?\n", "-- skipped pg_trgm\n", schema_sql)
@@ -64,8 +62,6 @@ with psycopg.connect(dsn) as c:
         cur.execute(catalogue_p2)
     c.commit()
 
-# ------- Build synthetic IMD bulletin PDF ------------------------------
-
 print("\n[3/8] building synthetic IMD bulletin PDF...")
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
@@ -73,8 +69,6 @@ from reportlab.lib.pagesizes import A4
 pdf_path = Path(work) / "imd_synthetic.pdf"
 c_pdf = canvas.Canvas(str(pdf_path), pagesize=A4)
 W, H = A4
-
-# Page 1: synoptic summary
 c_pdf.setFont("Helvetica-Bold", 14)
 c_pdf.drawString(72, H - 72, "INDIA METEOROLOGICAL DEPARTMENT")
 c_pdf.setFont("Helvetica", 11)
@@ -91,32 +85,24 @@ for line in [
 ]:
     c_pdf.drawString(72, y, line)
     y -= 16
-
 c_pdf.showPage()
-
-# Page 2: station observations table
 c_pdf.setFont("Helvetica-Bold", 12)
 c_pdf.drawString(72, H - 72, "Station-wise observations (24h ending 0830 IST 15-Jan-2026)")
 c_pdf.setFont("Helvetica", 10)
 c_pdf.drawString(72, H - 100, "Station          Tmax(C)   Tmin(C)   RF(mm)")
 c_pdf.drawString(72, H - 116, "----------------------------------------------")
 y = H - 132
-# Realistic Jan winter values for these stations
-station_rows = [
+for name, tmax, tmin, rain in [
     ("LEH",     -8.5,  -15.2,  0.0),
     ("KARGIL",  -5.0,  -13.0,  2.5),
     ("DRASS",  -10.0,  -22.0,  1.0),
-    ("SRINAGAR", 4.0,  -3.5,   0.0),     # not in our gazetteer — should be ignored
-]
-for name, tmax, tmin, rain in station_rows:
+    ("SRINAGAR", 4.0,  -3.5,   0.0),  # not in gazetteer — should be filtered
+]:
     c_pdf.drawString(72, y, f"{name:<16} {tmax:>6.1f}    {tmin:>6.1f}    {rain:>5.1f}")
     y -= 16
-
 c_pdf.save()
 pdf_bytes = pdf_path.read_bytes()
-print(f"      synthetic PDF: {len(pdf_bytes)} bytes, {pdf_path}")
-
-# ------- Build synthetic Wikipedia page --------------------------------
+print(f"      synthetic PDF: {len(pdf_bytes)} bytes")
 
 print("\n[4/8] building synthetic Wikipedia HTML fixture...")
 wiki_html = """<!DOCTYPE html>
@@ -147,10 +133,7 @@ wiki_html = """<!DOCTYPE html>
 </html>"""
 wiki_bytes = wiki_html.encode("utf-8")
 
-# ------- Insert artifacts directly (skipping fetch layer) -------------
-
 print("\n[5/8] inserting synthetic artifacts as raw_artifacts rows...")
-import hashlib
 
 def insert_synthetic(source_id, content, content_type, url):
     sha = hashlib.sha256(content).hexdigest()
@@ -185,110 +168,64 @@ wiki_artifact = insert_synthetic(
 print(f"      imd_artifact:  {imd_artifact}")
 print(f"      wiki_artifact: {wiki_artifact}")
 
-# ------- Run extractors ------------------------------------------------
-
 print("\n[6/8] running extractors...")
 from bastion.sources import EXTRACTOR_BY_SOURCE
 
 n_imd = EXTRACTOR_BY_SOURCE["imd_daily_bulletin"]().extract(imd_artifact)
 print(f"      imd extractor wrote {n_imd} new claims")
-assert n_imd >= 4, f"expected at least 4 IMD claims (1 summary + 3 stations), got {n_imd}"
+assert n_imd >= 4
 
 n_wiki = EXTRACTOR_BY_SOURCE["wikipedia_indianarmy"]().extract(wiki_artifact)
 print(f"      wiki extractor wrote {n_wiki} new claims")
-assert n_wiki >= 1, f"expected at least 1 wiki claim (the formation), got {n_wiki}"
-
-# ------- Verify claims and lineage -------------------------------------
+assert n_wiki >= 1
 
 print("\n[7/8] verifying claims + evidence + lineage...")
 with psycopg.connect(dsn, row_factory=dict_row) as c:
-    # IMD claims
     imd_claims = c.execute("""
-        SELECT claim_type, claim_payload, confidence
-        FROM bastion_provenance.claims
+        SELECT claim_type, claim_payload, confidence FROM bastion_provenance.claims
         WHERE claim_payload->>'source_url' LIKE '%imd.gov.in%'
            OR claim_payload->>'station' IS NOT NULL
         ORDER BY claim_type, claim_payload->>'station' NULLS FIRST;
     """).fetchall()
     print(f"\n      IMD claims ({len(imd_claims)}):")
-    for c_row in imd_claims:
-        ct = c_row["claim_type"]
+    for cr in imd_claims:
+        ct = cr["claim_type"]; p = cr["claim_payload"]
         if ct == "imd_synoptic_summary":
-            print(f"        {ct}  date={c_row['claim_payload'].get('date')}  "
-                  f"summary[:80]={c_row['claim_payload'].get('summary_text','')[:80]!r}")
+            print(f"        {ct}  date={p.get('date')}  summary[:80]={p.get('summary_text','')[:80]!r}")
         else:
-            p = c_row["claim_payload"]
-            print(f"        {ct}  station={p['station']:<8} date={p['date']}  "
-                  f"tmax={p['tmax_c']}  tmin={p['tmin_c']}  rain={p.get('rain_mm_24h')}")
+            print(f"        {ct}  station={p['station']:<8} date={p['date']}  tmax={p['tmax_c']}  tmin={p['tmin_c']}  rain={p.get('rain_mm_24h')}")
 
-    # Wiki claims
     wiki_claims = c.execute("""
-        SELECT claim_type, claim_payload, confidence
-        FROM bastion_provenance.claims
+        SELECT claim_type, claim_payload, confidence FROM bastion_provenance.claims
         WHERE claim_payload->>'source_url' LIKE '%wikipedia%'
         ORDER BY claim_type;
     """).fetchall()
     print(f"\n      Wiki claims ({len(wiki_claims)}):")
-    for c_row in wiki_claims:
-        ct = c_row["claim_type"]
-        p = c_row["claim_payload"]
+    for cr in wiki_claims:
+        ct = cr["claim_type"]; p = cr["claim_payload"]
         if ct == "orbat_formation":
-            print(f"        {ct}  name={p['name']!r} type={p.get('formation_type')} "
-                  f"hq={p.get('headquarters')!r} parent={p.get('parent_formation')!r}")
+            print(f"        {ct}  name={p['name']!r} type={p.get('formation_type')} hq={p.get('headquarters')!r} parent={p.get('parent_formation')!r}")
         else:
-            print(f"        {ct}  parent={p.get('parent')!r} -> "
-                  f"sub={p.get('subordinate')!r} conf={c_row['confidence']}")
-
-    # Lineage view: confirms the JOIN works (claim -> evidence -> artifact -> source)
-    lineage = c.execute("""
-        SELECT claim_type, source_id, source_name, realism_tier, locator
-        FROM bastion_provenance.v_claim_lineage cl
-        JOIN bastion_provenance.evidence_links el USING (claim_id)
-        WHERE cl.claim_id = ANY(SELECT claim_id FROM bastion_provenance.claims LIMIT 200)
-        LIMIT 5;
-    """).fetchall()
-    # The view's locator field returns from evidence_links via the JOIN.
-    # Just count rows for sanity.
+            print(f"        {ct}  parent={p.get('parent')!r} -> sub={p.get('subordinate')!r} conf={cr['confidence']}")
 
     n_lineage_rows = c.execute("SELECT COUNT(*) AS n FROM bastion_provenance.v_claim_lineage").fetchone()["n"]
     print(f"\n      v_claim_lineage rows: {n_lineage_rows}")
-    assert n_lineage_rows >= n_imd + n_wiki, "lineage view missing rows"
+    assert n_lineage_rows >= n_imd + n_wiki
 
-    # Sample one claim's full lineage
     sample = c.execute("""
         SELECT claim_type, source_id, source_name, realism_tier, fetched_url
-        FROM bastion_provenance.v_claim_lineage
-        WHERE claim_type = 'imd_station_obs'
-        LIMIT 1;
+        FROM bastion_provenance.v_claim_lineage WHERE claim_type = 'imd_station_obs' LIMIT 1;
     """).fetchone()
-    print(f"      sample lineage: {sample['claim_type']} <- {sample['source_id']} "
-          f"({sample['realism_tier']}) <- {sample['fetched_url']}")
-
-# ------- Idempotency test ----------------------------------------------
+    print(f"      sample lineage: {sample['claim_type']} <- {sample['source_id']} ({sample['realism_tier']}) <- {sample['fetched_url']}")
 
 print("\n[8/8] idempotency test (re-run extractors)...")
 n_imd_2 = EXTRACTOR_BY_SOURCE["imd_daily_bulletin"]().extract(imd_artifact)
 n_wiki_2 = EXTRACTOR_BY_SOURCE["wikipedia_indianarmy"]().extract(wiki_artifact)
 print(f"      imd re-run wrote {n_imd_2} new claims (expected 0)")
 print(f"      wiki re-run wrote {n_wiki_2} new claims (expected 0)")
-assert n_imd_2 == 0, "extractor not idempotent — got new IMD claims on re-run"
-assert n_wiki_2 == 0, "extractor not idempotent — got new wiki claims on re-run"
-
-with psycopg.connect(dsn, row_factory=dict_row) as c:
-    total_claims = c.execute("SELECT COUNT(*) AS n FROM bastion_provenance.claims").fetchone()["n"]
-    total_links = c.execute("SELECT COUNT(*) AS n FROM bastion_provenance.evidence_links").fetchone()["n"]
-print(f"      total claims:        {total_claims}")
-print(f"      total evidence_links: {total_links}")
+assert n_imd_2 == 0
+assert n_wiki_2 == 0
 
 print("\n" + "=" * 72)
 print("ALL THURSDAY ASSERTIONS PASSED")
 print("=" * 72)
-print()
-print("Extractor pipeline verified end-to-end:")
-print("  - PDF extraction (pdfplumber) parses synoptic summary + station table")
-print("  - HTML extraction (BeautifulSoup) parses Wikipedia infobox + lead text")
-print("  - Per-station gazetteer correctly filters non-Ladakh stations")
-print("  - claims rows have stable deterministic UUIDs")
-print("  - evidence_links rows tie claims back to artifacts")
-print("  - v_claim_lineage joins all the way back to source metadata")
-print("  - re-running an extractor produces zero new claims (idempotent)")
