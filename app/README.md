@@ -9,9 +9,13 @@ renders an interactive web app deployed to Vercel.
 
 ## Status
 
-Wk7 of 12 (Path C). App skeleton + data wiring. Map renders posts and
-depots from the locked content files. No time-varying state yet — that
-arrives in Wk8 (timeline scrubber, scenario selector, status colors).
+**Wk8 of 12 (Path C).** Scenario engine + timeline scrubber. Three scenarios
+walkable end-to-end. Status colors flip on the right days. Disruption events
+fire on day-of. Closed strategic-axis routes render as red dashed polylines.
+Click a post to see its current snapshot in the sidebar.
+
+**Wk9 next:** resupply-options card, provenance click-through panel, SITREP
+markdown export stub.
 
 ## Stack
 
@@ -38,10 +42,10 @@ app/
 ├── public/
 │   └── data/                   # synced from /data/fsp/ at build time
 ├── scripts/
-│   └── sync-fsp-data.mjs       # copy script (see below)
+│   └── sync-fsp-data.mjs       # copy script
 └── src/
     ├── main.tsx                # React entry
-    ├── App.tsx                 # top-level layout
+    ├── App.tsx                 # top-level layout, header, loaded/error states
     ├── index.css               # Tailwind + MapLibre overrides
     ├── types/
     │   ├── posts.ts
@@ -51,27 +55,40 @@ app/
     │   ├── scenarios.ts
     │   └── index.ts
     ├── hooks/
-    │   └── useFspData.ts       # loads + validates all 5 files
+    │   ├── useFspData.ts       # loads + validates all 5 files
+    │   └── useScenarioState.ts # selected scenario + day; derives world-state    [Wk8]
+    ├── lib/                                                                       [Wk8]
+    │   ├── consumption.ts      # kerosene burn math, terrain class lookup
+    │   ├── statusDerivation.ts # days-to-stockout → status mapping
+    │   └── scenarioEngine.ts   # daily simulation, world-state per (scenario, day)
     └── components/
-        └── MapView.tsx         # MapLibre canvas + markers
+        ├── MapView.tsx         # MapLibre canvas + status-colored markers + closed routes
+        ├── Sidebar.tsx         # scenario controls + post list + detail panel    [Wk8]
+        ├── ScenarioSelector.tsx                                                   [Wk8]
+        ├── TimelineScrubber.tsx                                                   [Wk8]
+        ├── DisruptionBanner.tsx                                                   [Wk8]
+        ├── PostDetailPanel.tsx                                                    [Wk8]
+        └── StatusPill.tsx      # reusable status indicator + STATUS_HEX export   [Wk8]
 ```
 
-## Data flow
+## Scenario engine — how it works
 
-1. `data/fsp/*.json` (repo root) is the **single source of truth**.
-2. `scripts/sync-fsp-data.mjs` copies those files into `app/public/data/`
-   on every `npm run dev` and `npm run build` (via npm pre-hooks).
-3. `useFspData()` fetches them at runtime from `/data/posts.json` etc.
-4. Validation: the hook asserts the locked counts (15 posts, 4 depots,
-   3 LoCs, 30 SKUs, 9 vehicles, 3 scenarios) and fails loud if violated.
+`lib/scenarioEngine.ts` exposes `computeWorldState(scenario, day, posts, skus)`
+which returns a `ScenarioWorldState` snapshot for any (scenario, day) pair.
 
-**Never edit files in `app/public/data/` directly** — they're overwritten
-on the next build. Edit `data/fsp/*.json` at the repo root.
+The engine **anchors to the `key_projection_days` values authored in
+`scenarios.json`** when one exists for the requested day. Between anchors it
+linearly interpolates stocks, using the daily burn formula in
+`lib/consumption.ts` (mirrors the calc strings in scenarios.json).
 
-**Why copy instead of bundling JSON into JS:** the demo's provenance story
-depends on users being able to inspect the raw data files. Serving them as
-static assets at predictable URLs (`/data/posts.json`) makes that possible.
-A user clicking a number in the UI can be linked to the file it came from.
+This means:
+- Day 5 of S2 (an authored anchor) shows exactly what `scenarios.json` says.
+- Day 6 of S2 shows a coherent interpolation between Day 5 and Day 12.
+- Day 12 of S2 shows exactly what the file says again.
+- An advisor can scrub to any day and see plausible numbers.
+
+The Wk9 provenance UI will surface "this number came from the authored anchor
+at Day N" vs "this number was interpolated" so reviewers can audit the path.
 
 ## Design language
 
@@ -87,15 +104,16 @@ from the data discipline and provenance UI, not from the chrome.
 (Lighthouse, the sister product, retains the dark HUD aesthetic. Bastion
 deliberately doesn't.)
 
-## Wk7 deferred items (handled in later weeks)
+## Wk8 deferred items (handled in later weeks)
 
-- **Wk8** — Scenario engine, timeline scrubber, status-colored markers,
-  drill-down panels, route segment polylines.
-- **Wk9** — Resupply options card, provenance click-through, SITREP export
-  stub.
+- **Wk9** — Resupply options card with three options per active alert,
+  provenance click-through showing the lineage from any number back to its
+  source data file, SITREP markdown export (stub formatting; final polish Wk14).
 - **Wk13** — Design polish, self-hosted PMTiles basemap, hex-binning of
-  posts by status (if it improves clarity), localized Inter font.
+  posts by status (only if it adds clarity), localized Inter font, tactical
+  edge polylines (currently only strategic-axis closures render as lines).
 - **Wk14** — Provenance UI proper (the "click any number, see its source"
   feature that's the Palantir-grade differentiator).
-- **Wk15** — Unscripted what-if mode (operator injects arbitrary disruptions).
-- **Wk16** — Polish, Loom walkthrough, Vercel production deploy.
+- **Wk15** — Unscripted what-if mode (operator injects arbitrary disruptions
+  beyond the three scripted scenarios; live re-simulation).
+- **Wk16** — Polish, recorded Loom walkthrough, Vercel production deploy.

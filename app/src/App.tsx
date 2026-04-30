@@ -1,48 +1,103 @@
 /**
- * App — top-level shell.
+ * App (Wk8) — top-level shell, now scenario-aware.
  *
- * Layout:
- *   ┌──────────────────────────────────────────────────┐
- *   │  Header: product name, env, version              │
- *   ├──────────────┬───────────────────────────────────┤
- *   │              │                                    │
- *   │   Sidebar    │            MapView                 │
- *   │  (Wk8 will   │                                    │
- *   │   add the    │                                    │
- *   │   scenario   │                                    │
- *   │   scrubber)  │                                    │
- *   │              │                                    │
- *   └──────────────┴───────────────────────────────────┘
+ * State owned here:
+ *   - selectedPostId (drives map highlight + sidebar detail panel)
  *
- * Wk7 deliberately leaves the sidebar mostly empty — its content (timeline
- * scrubber, scenario selector, post drill-down) is the entire point of Wk8.
- * Putting placeholder copy there now makes the empty-state visible to anyone
- * reviewing the demo and keeps the layout from feeling broken.
+ * Scenario state (selected scenario, current day, derived world-state)
+ * is in useScenarioState, loaded from useFspData.
  */
+import { useState } from "react";
 import { MapView } from "@/components/MapView";
-import { useFspData } from "@/hooks/useFspData";
+import { Sidebar } from "@/components/Sidebar";
+import { DisruptionBanner } from "@/components/DisruptionBanner";
+import { StatusPill } from "@/components/StatusPill";
+import { useFspData, type FspData } from "@/hooks/useFspData";
+import { useScenarioState } from "@/hooks/useScenarioState";
 
 export function App() {
   const state = useFspData();
 
   return (
     <div className="flex h-full w-full flex-col">
-      <Header />
-      <div className="flex flex-1 overflow-hidden">
-        <Sidebar />
-        <main className="flex-1 bg-surface">
-          {state.status === "loading" && <LoadingPanel />}
-          {state.status === "error" && <ErrorPanel error={state.error} />}
-          {state.status === "ready" && <MapView data={state.data.posts} />}
-        </main>
-      </div>
+      {state.status === "loading" && (
+        <>
+          <Header />
+          <main className="flex flex-1 items-center justify-center bg-surface text-sm text-ink-muted">
+            Loading FSP data…
+          </main>
+        </>
+      )}
+      {state.status === "error" && (
+        <>
+          <Header />
+          <main className="flex flex-1 items-center justify-center bg-surface p-8">
+            <div className="max-w-2xl rounded-md border border-status-critical-soft bg-status-critical-soft p-4">
+              <div className="text-sm font-semibold text-status-critical">
+                Could not load demo data
+              </div>
+              <pre className="mt-2 whitespace-pre-wrap font-mono text-xs text-ink-muted">
+                {state.error}
+              </pre>
+            </div>
+          </main>
+        </>
+      )}
+      {state.status === "ready" && <Loaded data={state.data} />}
     </div>
   );
 }
 
-// ---- Header ----
+function Loaded({ data }: { data: FspData }) {
+  const { scenarioId, setScenarioId, day, setDay, worldState } = useScenarioState(data);
+  const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
 
-function Header() {
+  return (
+    <>
+      <Header
+        scenarioTitle={worldState.scenario_title}
+        worstStatus={worldState.global_worst_status}
+        day={worldState.day}
+        durationDays={worldState.duration_days}
+      />
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar
+          data={data}
+          scenarioId={scenarioId}
+          setScenarioId={setScenarioId}
+          day={day}
+          setDay={setDay}
+          worldState={worldState}
+          selectedPostId={selectedPostId}
+          onSelectPost={setSelectedPostId}
+        />
+        <main className="flex flex-1 flex-col bg-surface">
+          {worldState.todays_disruptions.length > 0 && (
+            <DisruptionBanner events={worldState.todays_disruptions} />
+          )}
+          <div className="relative flex-1">
+            <MapView
+              posts={data.posts}
+              routes={data.routes}
+              worldState={worldState}
+              selectedPostId={selectedPostId}
+              onSelectPost={setSelectedPostId}
+            />
+          </div>
+        </main>
+      </div>
+    </>
+  );
+}
+
+interface HeaderProps {
+  scenarioTitle?: string;
+  worstStatus?: import("@/types").PostStatus;
+  day?: number;
+  durationDays?: number;
+}
+
+function Header({ scenarioTitle, worstStatus, day, durationDays }: HeaderProps) {
   return (
     <header className="flex h-12 shrink-0 items-center justify-between border-b border-line bg-canvas px-4">
       <div className="flex items-center gap-3">
@@ -55,76 +110,22 @@ function Header() {
         </div>
       </div>
       <div className="flex items-center gap-3 text-xs text-ink-muted">
+        {scenarioTitle && (
+          <span className="max-w-md truncate text-ink">
+            {scenarioTitle}
+          </span>
+        )}
+        {day !== undefined && durationDays !== undefined && (
+          <span className="rounded border border-line bg-surface px-2 py-0.5 font-mono">
+            D{day}/{durationDays}
+          </span>
+        )}
+        {worstStatus && <StatusPill status={worstStatus} size="sm" />}
         <span className="rounded border border-line bg-surface px-2 py-0.5 font-medium">
           DEMO
         </span>
-        <span>XIV Corps AOI · Eastern Ladakh</span>
-        <span className="text-ink-faint">v0.1 · Wk7</span>
+        <span className="text-ink-faint">v0.2 · Wk8</span>
       </div>
     </header>
-  );
-}
-
-// ---- Sidebar ----
-
-function Sidebar() {
-  return (
-    <aside className="flex w-72 shrink-0 flex-col border-r border-line bg-canvas">
-      <div className="border-b border-line p-4">
-        <div className="text-xs font-semibold uppercase tracking-wider text-ink-faint">
-          Scenario
-        </div>
-        <div className="mt-2 rounded border border-line bg-surface p-3 text-sm text-ink-muted">
-          Scenario controls and the 90-day timeline scrubber appear here in
-          Wk8. For now the map shows posts and depots without time-varying
-          status.
-        </div>
-      </div>
-      <div className="border-b border-line p-4">
-        <div className="text-xs font-semibold uppercase tracking-wider text-ink-faint">
-          Selection
-        </div>
-        <div className="mt-2 text-sm text-ink-muted">
-          Click a marker on the map to see post or depot details.
-        </div>
-      </div>
-      <div className="mt-auto border-t border-line p-4 text-xs text-ink-faint">
-        Synthetic + public-data demo. See the methodology document at{" "}
-        <a
-          href="/data/methodology.md"
-          className="text-accent hover:text-accent-hover"
-          target="_blank"
-          rel="noreferrer"
-        >
-          /data/methodology.md
-        </a>
-        .
-      </div>
-    </aside>
-  );
-}
-
-// ---- Loading + error states ----
-
-function LoadingPanel() {
-  return (
-    <div className="flex h-full items-center justify-center text-sm text-ink-muted">
-      Loading FSP data…
-    </div>
-  );
-}
-
-function ErrorPanel({ error }: { error: string }) {
-  return (
-    <div className="flex h-full items-center justify-center p-8">
-      <div className="max-w-2xl rounded-md border border-status-critical-soft bg-status-critical-soft p-4">
-        <div className="text-sm font-semibold text-status-critical">
-          Could not load demo data
-        </div>
-        <pre className="mt-2 whitespace-pre-wrap font-mono text-xs text-ink-muted">
-          {error}
-        </pre>
-      </div>
-    </div>
   );
 }
