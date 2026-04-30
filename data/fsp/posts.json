@@ -1,0 +1,358 @@
+{
+  "_meta": {
+    "artifact": "bastion_fsp_posts",
+    "version": "wk6_v1_locked",
+    "aoi": "eastern_ladakh_xiv_corps",
+    "aoi_bbox": [76.0, 32.5, 79.5, 35.5],
+    "crs": "EPSG:4326",
+    "coord_order": "[lon, lat]",
+    "altitude_unit": "metres_amsl",
+    "provenance_grades": {
+      "A": "Publicly documented location; coordinates and name verifiable in open sources (Wikipedia, news, public maps).",
+      "B": "Real area or terrain feature is publicly known; specific picket/post position within that area is illustrative.",
+      "C": "Generic designator; clearly synthetic. Used where real picket numbering is not public."
+    },
+    "formation_disclaimer": "Formation assignments reflect publicly documented divisional Areas of Responsibility (AORs). Brigade-level assignments are illustrative for demo purposes and do not represent classified ORBAT.",
+    "altitude_bands": {
+      "low":      "<3500m  (~<11,500ft)  — road-connected, year-round access typical",
+      "medium":   "3500-4500m (~11,500-14,750ft)  — seasonal access, increased consumption",
+      "high":     "4500-5000m (~14,750-16,400ft)  — restricted access, high consumption multipliers",
+      "extreme":  ">5000m  (~>16,400ft)  — air/foot resupply only in winter, extreme conditions"
+    }
+  },
+
+  "depots": [
+    {
+      "depot_id": "DEPOT-LEH",
+      "name": "Leh ASC Depot",
+      "tier": "corps_main",
+      "coords": [77.5800, 34.1500],
+      "altitude_m": 3524,
+      "altitude_band": "low",
+      "supports_subdepots": ["DEPOT-KARU", "DEPOT-HANLE", "DEPOT-KARGIL"],
+      "fed_by": ["LOC-WEST_ZOJILA", "LOC-SOUTH_MANALI", "LOC-AIR_LEH"],
+      "provenance_grade": "A",
+      "provenance_note": "Leh is publicly the Army's main forward supply node for Ladakh."
+    },
+    {
+      "depot_id": "DEPOT-KARU",
+      "name": "Karu Sub-Depot",
+      "tier": "division_sub",
+      "coords": [77.7400, 33.9400],
+      "altitude_m": 3700,
+      "altitude_band": "medium",
+      "supports_posts": ["POST-001","POST-002","POST-003","POST-004","POST-005","POST-006","POST-007","POST-008"],
+      "fed_by_depot": "DEPOT-LEH",
+      "notional_formation": "3 Infantry Division (Trishul Division)",
+      "provenance_grade": "A",
+      "provenance_note": "Karu is publicly the location of 3 Inf Div HQ."
+    },
+    {
+      "depot_id": "DEPOT-HANLE",
+      "name": "Hanle Sub-Depot",
+      "tier": "division_sub",
+      "coords": [79.0000, 32.7800],
+      "altitude_m": 4290,
+      "altitude_band": "medium",
+      "supports_posts": ["POST-009", "POST-010", "POST-011"],
+      "fed_by_depot": "DEPOT-LEH",
+      "notional_formation": "3 Infantry Division (Trishul Division)",
+      "provenance_grade": "B",
+      "provenance_note": "Hanle is a publicly known forward locality with co-located civilian/military presence; specific sub-depot role is illustrative."
+    },
+    {
+      "depot_id": "DEPOT-KARGIL",
+      "name": "Kargil Main Depot",
+      "tier": "brigade_main",
+      "coords": [76.1300, 34.5500],
+      "altitude_m": 2680,
+      "altitude_band": "low",
+      "supports_posts": ["POST-012", "POST-013", "POST-014", "POST-015"],
+      "fed_by_depot": "DEPOT-LEH",
+      "fed_by_loc_alternate": "LOC-WEST_ZOJILA",
+      "notional_formation": "8 Mountain Division (Forever in Operations)",
+      "provenance_grade": "A",
+      "provenance_note": "Kargil town is publicly known; Brigade HQ in this sector is publicly documented."
+    }
+  ],
+
+  "posts": [
+
+    {
+      "post_id": "POST-001",
+      "name": "DBO Base",
+      "sub_sector": "DBO_axis",
+      "type": "forward_base",
+      "coords": [77.8300, 35.3400],
+      "altitude_m": 5065,
+      "altitude_band": "extreme",
+      "primary_depot": "DEPOT-KARU",
+      "primary_route_segments_outbound": ["RT-KARU-DBO"],
+      "notional_formation": "XIV Corps direct (illustrative)",
+      "provenance_grade": "A",
+      "provenance_note": "DBO/Daulat Beg Oldi is one of the most publicly documented forward locations in India. Airstrip and road link both confirmed in open sources.",
+      "consumption_profile_hint": "Highest extreme-altitude multipliers; air-resupply-dominant in winter."
+    },
+
+    {
+      "post_id": "POST-002",
+      "name": "Murgo Sub-Base",
+      "sub_sector": "DBO_axis",
+      "type": "subdepot_transit",
+      "coords": [77.6700, 35.0400],
+      "altitude_m": 4470,
+      "altitude_band": "medium",
+      "primary_depot": "DEPOT-KARU",
+      "primary_route_segments_outbound": ["RT-KARU-MURGO"],
+      "notional_formation": "XIV Corps support echelon",
+      "provenance_grade": "A",
+      "provenance_note": "Murgo is the established staging point on the Shyok-DBO road, publicly documented.",
+      "consumption_profile_hint": "Transit camp; throughput-dominant rather than consumption-dominant."
+    },
+
+    {
+      "post_id": "POST-003",
+      "name": "FOB Galwan",
+      "sub_sector": "DBO_axis",
+      "type": "forward_picket",
+      "coords": [78.9200, 34.7900],
+      "altitude_m": 4800,
+      "altitude_band": "high",
+      "primary_depot": "DEPOT-KARU",
+      "primary_route_segments_outbound": ["RT-KARU-GALWAN"],
+      "notional_formation": "3 Inf Div subordinate",
+      "provenance_grade": "B",
+      "provenance_note": "Galwan valley is publicly known. Specific picket layout within the valley is illustrative and consistent with reported deployments.",
+      "consumption_profile_hint": "High-altitude band; access constrained by Shyok river crossings."
+    },
+
+    {
+      "post_id": "POST-004",
+      "name": "PP-North-1",
+      "sub_sector": "DBO_axis",
+      "type": "patrol_post",
+      "coords": [78.2000, 34.9500],
+      "altitude_m": 4950,
+      "altitude_band": "high",
+      "primary_depot": "DEPOT-KARU",
+      "primary_route_segments_outbound": ["RT-KARU-DBO"],
+      "notional_formation": "3 Inf Div",
+      "provenance_grade": "C",
+      "provenance_note": "Generic designator. Patrol points are numbered in real life but the specific numbering scheme and exact locations are not public.",
+      "consumption_profile_hint": "Small establishment; foot/vehicle-resupply, no air."
+    },
+
+    {
+      "post_id": "POST-005",
+      "name": "Chushul Garrison",
+      "sub_sector": "Pangong_Chushul",
+      "type": "garrison_subdepot",
+      "coords": [78.6500, 33.5800],
+      "altitude_m": 4360,
+      "altitude_band": "medium",
+      "primary_depot": "DEPOT-KARU",
+      "primary_route_segments_outbound": ["RT-KARU-CHUSHUL"],
+      "notional_formation": "3 Inf Div, Trishul Division HQ-adjacent",
+      "provenance_grade": "A",
+      "provenance_note": "Chushul is a publicly known garrison location with documented road connectivity via Chang La.",
+      "consumption_profile_hint": "Larger establishment; serves as forward distribution point for Pangong-Chushul cluster."
+    },
+
+    {
+      "post_id": "POST-006",
+      "name": "Rezang La OP",
+      "sub_sector": "Pangong_Chushul",
+      "type": "observation_post",
+      "coords": [78.7800, 33.4700],
+      "altitude_m": 4750,
+      "altitude_band": "high",
+      "primary_depot": "DEPOT-KARU",
+      "primary_route_segments_outbound": ["RT-KARU-CHUSHUL", "RT-CHUSHUL-REZANG"],
+      "notional_formation": "3 Inf Div",
+      "provenance_grade": "A",
+      "provenance_note": "Rezang La is publicly known (1962 battle memorial site).",
+      "consumption_profile_hint": "Small OP; high winter wear on equipment."
+    },
+
+    {
+      "post_id": "POST-007",
+      "name": "Spanggur Gap",
+      "sub_sector": "Pangong_Chushul",
+      "type": "forward_picket",
+      "coords": [78.8000, 33.5500],
+      "altitude_m": 4250,
+      "altitude_band": "medium",
+      "primary_depot": "DEPOT-KARU",
+      "primary_route_segments_outbound": ["RT-KARU-CHUSHUL", "RT-CHUSHUL-SPANGGUR"],
+      "notional_formation": "3 Inf Div",
+      "provenance_grade": "B",
+      "provenance_note": "Spanggur Gap is publicly named; specific picket layout is illustrative.",
+      "consumption_profile_hint": "Medium-altitude band; vehicle-resupplied."
+    },
+
+    {
+      "post_id": "POST-008",
+      "name": "Finger Area North-Bank OP",
+      "sub_sector": "Pangong_Chushul",
+      "type": "observation_post",
+      "coords": [78.5500, 33.9200],
+      "altitude_m": 4300,
+      "altitude_band": "medium",
+      "primary_depot": "DEPOT-KARU",
+      "primary_route_segments_outbound": ["RT-KARU-PANGONG_NORTH"],
+      "notional_formation": "3 Inf Div",
+      "provenance_grade": "B",
+      "provenance_note": "Fingers 1-8 are publicly known terminology for the Pangong north-bank ridgelines. Specific OP position is illustrative.",
+      "consumption_profile_hint": "Lakeside terrain; access varies seasonally with lake ice."
+    },
+
+    {
+      "post_id": "POST-009",
+      "name": "Hanle Forward Camp",
+      "sub_sector": "Demchok_Hanle",
+      "type": "forward_base",
+      "coords": [79.0000, 32.7800],
+      "altitude_m": 4290,
+      "altitude_band": "medium",
+      "primary_depot": "DEPOT-HANLE",
+      "primary_route_segments_outbound": [],
+      "notional_formation": "3 Inf Div / ITBP joint AOR",
+      "provenance_grade": "A",
+      "provenance_note": "Hanle is publicly known; co-located with Indian Astronomical Observatory which serves as a public reference point.",
+      "consumption_profile_hint": "Co-located with sub-depot; throughput plus consumption."
+    },
+
+    {
+      "post_id": "POST-010",
+      "name": "Demchok Picket",
+      "sub_sector": "Demchok_Hanle",
+      "type": "border_picket",
+      "coords": [79.4500, 32.7000],
+      "altitude_m": 4380,
+      "altitude_band": "medium",
+      "primary_depot": "DEPOT-HANLE",
+      "primary_route_segments_outbound": ["RT-HANLE-DEMCHOK"],
+      "notional_formation": "3 Inf Div",
+      "provenance_grade": "A",
+      "provenance_note": "Demchok is a publicly known disputed locality on the Indus.",
+      "consumption_profile_hint": "Border picket; small establishment; vehicle-resupplied."
+    },
+
+    {
+      "post_id": "POST-011",
+      "name": "Loma Sub-Base",
+      "sub_sector": "Demchok_Hanle",
+      "type": "subdepot_transit",
+      "coords": [79.1000, 32.9500],
+      "altitude_m": 4150,
+      "altitude_band": "medium",
+      "primary_depot": "DEPOT-HANLE",
+      "primary_route_segments_outbound": ["RT-HANLE-LOMA"],
+      "notional_formation": "3 Inf Div support",
+      "provenance_grade": "B",
+      "provenance_note": "Loma is on the Hanle-Demchok axis; specific transit/sub-base role is illustrative.",
+      "consumption_profile_hint": "Transit-dominant; throughput proxies."
+    },
+
+    {
+      "post_id": "POST-012",
+      "name": "Drass Garrison",
+      "sub_sector": "Kargil_Drass",
+      "type": "garrison_subdepot",
+      "coords": [75.7500, 34.4300],
+      "altitude_m": 3280,
+      "altitude_band": "low",
+      "primary_depot": "DEPOT-KARGIL",
+      "primary_route_segments_outbound": ["RT-KARGIL-DRASS"],
+      "notional_formation": "8 Mtn Div",
+      "provenance_grade": "A",
+      "provenance_note": "Drass is publicly known (Kargil War, second-coldest inhabited place globally).",
+      "consumption_profile_hint": "Low-altitude but extreme-cold profile; heating/kerosene-dominant."
+    },
+
+    {
+      "post_id": "POST-013",
+      "name": "Kargil Sector HQ",
+      "sub_sector": "Kargil_Drass",
+      "type": "brigade_hq_main_depot",
+      "coords": [76.1300, 34.5500],
+      "altitude_m": 2680,
+      "altitude_band": "low",
+      "primary_depot": "DEPOT-KARGIL",
+      "primary_route_segments_outbound": ["RT-LEH-KARGIL", "RT-ZOJILA-KARGIL"],
+      "notional_formation": "8 Mtn Div, brigade HQ",
+      "provenance_grade": "A",
+      "provenance_note": "Kargil is publicly known; co-located with main depot for sector.",
+      "consumption_profile_hint": "Brigade HQ scale; throughput for entire western sector."
+    },
+
+    {
+      "post_id": "POST-014",
+      "name": "Mushkoh Valley OP",
+      "sub_sector": "Kargil_Drass",
+      "type": "observation_post",
+      "coords": [76.1000, 34.5500],
+      "altitude_m": 4500,
+      "altitude_band": "medium",
+      "primary_depot": "DEPOT-KARGIL",
+      "primary_route_segments_outbound": ["RT-KARGIL-MUSHKOH"],
+      "notional_formation": "8 Mtn Div",
+      "provenance_grade": "A",
+      "provenance_note": "Mushkoh Valley is publicly known (Kargil War operations).",
+      "consumption_profile_hint": "Medium-altitude OP; foot-resupply for forward elements."
+    },
+
+    {
+      "post_id": "POST-015",
+      "name": "Tiger Hill OP",
+      "sub_sector": "Kargil_Drass",
+      "type": "observation_post",
+      "coords": [75.9000, 34.4800],
+      "altitude_m": 5062,
+      "altitude_band": "extreme",
+      "primary_depot": "DEPOT-KARGIL",
+      "primary_route_segments_outbound": ["RT-KARGIL-DRASS", "RT-DRASS-TIGER"],
+      "notional_formation": "8 Mtn Div",
+      "provenance_grade": "A",
+      "provenance_note": "Tiger Hill is publicly known (Kargil War, Point 5062).",
+      "consumption_profile_hint": "Extreme altitude; foot/animal resupply for final approach."
+    }
+  ],
+
+  "loc_axes": [
+    {
+      "loc_id": "LOC-WEST_ZOJILA",
+      "name": "Western LoC: Srinagar–Zoji La–Drass–Kargil–Leh",
+      "type": "land_road",
+      "approx_length_km": 434,
+      "key_chokepoint": "Zoji La (3528m)",
+      "seasonal_pattern": "Closed approx Dec-Apr, open May-Nov; closure timing weather-dependent",
+      "feeds_depot": "DEPOT-LEH",
+      "provenance_grade": "A",
+      "provenance_note": "Srinagar-Leh highway and Zoji La pass are extensively publicly documented."
+    },
+    {
+      "loc_id": "LOC-SOUTH_MANALI",
+      "name": "Southern LoC: Manali–Rohtang/Atal Tunnel–Baralacha La–Taglang La–Leh",
+      "type": "land_road",
+      "approx_length_km": 472,
+      "key_chokepoints": ["Atal Tunnel/Rohtang", "Baralacha La (4890m)", "Taglang La (5359m)"],
+      "seasonal_pattern": "Open approx May-Oct only; multiple high passes",
+      "feeds_depot": "DEPOT-LEH",
+      "provenance_grade": "A",
+      "provenance_note": "Manali-Leh highway is publicly documented; pass altitudes from public sources."
+    },
+    {
+      "loc_id": "LOC-AIR_LEH",
+      "name": "Air Bridge: Chandigarh/Hindon → Leh (KBR)",
+      "type": "air",
+      "icao_dest": "VILH",
+      "aircraft_types_typical": ["AN-32", "IL-76", "C-17", "C-130J"],
+      "seasonal_pattern": "Year-round; weather-constrained on arrival",
+      "feeds_depot": "DEPOT-LEH",
+      "cost_multiplier_vs_road": "5-10x typical",
+      "provenance_grade": "A",
+      "provenance_note": "Kushok Bakula Rimpochee Airport (KBR/VILH) and Indian Air Force air bridge to Ladakh are publicly documented."
+    }
+  ]
+}

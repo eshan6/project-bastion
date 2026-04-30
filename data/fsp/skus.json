@@ -1,0 +1,671 @@
+{
+  "_meta": {
+    "artifact": "bastion_fsp_skus",
+    "version": "wk6_v1_locked",
+    "depends_on": ["posts.json (wk6_v1_locked)", "routes.json (wk6_v1_locked)"],
+    "design_notes": [
+      "30 SKUs across 6 stock heads. The 80/20 of cost and operational risk in Eastern Ladakh sustainment.",
+      "Terrain-class multipliers follow publicly known Indian Army doctrine: Plains, HA (>=9000ft), SHA (>=12000ft), ECC (Siachen-class, glacier).",
+      "All AOI posts fall into HA, SHA, or ECC bands. Plains baseline is included for reference only.",
+      "Per-soldier-per-day consumption rates are illustrative central estimates consistent with publicly reported figures.",
+      "Real Army scales of issue are restricted; the demo does not claim to reproduce them.",
+      "Stock heads mirror ASC/AOC organizational structure (publicly documented).",
+      "Critical to a Lt Gen: kerosene burn at SHA is the dominant SHA consumable. Get this right or nothing else looks credible."
+    ],
+    "altitude_bands_to_terrain_class_mapping": {
+      "low (<3500m)": "HA",
+      "medium (3500-4500m)": "HA_to_SHA_boundary",
+      "high (4500-5000m)": "SHA",
+      "extreme (>5000m)": "SHA_to_ECC"
+    },
+    "post_to_terrain_class": {
+      "POST-001": "ECC",
+      "POST-002": "SHA",
+      "POST-003": "SHA",
+      "POST-004": "SHA",
+      "POST-005": "SHA",
+      "POST-006": "SHA",
+      "POST-007": "SHA",
+      "POST-008": "SHA",
+      "POST-009": "SHA",
+      "POST-010": "SHA",
+      "POST-011": "SHA",
+      "POST-012": "HA_extreme_cold",
+      "POST-013": "HA",
+      "POST-014": "SHA",
+      "POST-015": "ECC"
+    },
+    "criticality_tiers": {
+      "T1": "Life-safety. Stockout means casualties. e.g. oxygen, kerosene at SHA in winter, IV fluids.",
+      "T2": "Mission-critical. Stockout degrades operational capability. e.g. ammunition at frontline posts, ATF for helo ops.",
+      "T3": "Comfort/sustainment. Stockout degrades morale/efficiency but not immediate capability. e.g. fresh meat, batteries for non-comms.",
+      "T4": "Routine. Stockout creates inconvenience. e.g. some general stores."
+    },
+    "consumption_units": {
+      "rations": "kg or units per soldier per day",
+      "pol": "litres per soldier per day OR per vehicle per day OR per generator per day (specified per SKU)",
+      "ammunition": "rounds per soldier per day baseline (peacetime training scale; combat scales differ wildly)",
+      "medical": "units per 100 soldiers per month",
+      "clothing": "set replacements per soldier per year (wear-out rate)",
+      "general": "varies by SKU"
+    },
+    "provenance_grading": {
+      "A": "SKU exists in public Army inventory documentation (CAG, Lok Sabha QA, MoD annual reports, manufacturer specs).",
+      "B": "SKU type/category exists publicly; specific consumption rate is illustrative.",
+      "C": "SKU is illustrative for demo purposes; would be a generic stand-in for several real items."
+    }
+  },
+
+  "stock_heads": [
+    {"id": "RATIONS",  "name": "Rations (Composite + Fresh)", "owner": "ASC", "skus_count": 5},
+    {"id": "POL",      "name": "Petroleum, Oils, Lubricants", "owner": "ASC", "skus_count": 5},
+    {"id": "AMMO",     "name": "Ammunition", "owner": "AOC", "skus_count": 6},
+    {"id": "MEDICAL",  "name": "Combat Medical Stores", "owner": "AMC", "skus_count": 4},
+    {"id": "CLOTHING", "name": "Clothing and High-Altitude Equipment", "owner": "AOC", "skus_count": 6},
+    {"id": "GENERAL",  "name": "General and Engineer Stores", "owner": "AOC_MES", "skus_count": 4}
+  ],
+
+  "skus": [
+
+    {
+      "sku_id": "SKU-RAT-001",
+      "name": "Composite Ration Pack (1-man-day)",
+      "stock_head": "RATIONS",
+      "criticality_tier": "T1",
+      "unit": "pack",
+      "unit_weight_kg": 1.2,
+      "unit_volume_l": 1.5,
+      "shelf_life_months": 18,
+      "consumption_baseline_per_soldier_per_day": {
+        "Plains": 1.0,
+        "HA": 1.1,
+        "SHA": 1.25,
+        "ECC": 1.4
+      },
+      "winter_uplift_factor": 1.05,
+      "substitution_allowed_with": ["SKU-RAT-002", "SKU-RAT-003"],
+      "provenance_grade": "A",
+      "provenance_note": "Composite Ration Pack is publicly documented in MoD annual reports and CAG audits. Multipliers reflect publicly cited terrain-class entitlement principle."
+    },
+    {
+      "sku_id": "SKU-RAT-002",
+      "name": "Atta (wheat flour, fortified)",
+      "stock_head": "RATIONS",
+      "criticality_tier": "T1",
+      "unit": "kg",
+      "unit_weight_kg": 1.0,
+      "unit_volume_l": 1.4,
+      "shelf_life_months": 12,
+      "consumption_baseline_per_soldier_per_day": {
+        "Plains": 0.40,
+        "HA": 0.45,
+        "SHA": 0.50,
+        "ECC": 0.55
+      },
+      "winter_uplift_factor": 1.0,
+      "substitution_allowed_with": ["SKU-RAT-001"],
+      "provenance_grade": "A",
+      "provenance_note": "Atta is a publicly documented standard fresh ration component."
+    },
+    {
+      "sku_id": "SKU-RAT-003",
+      "name": "Dal (mixed pulses)",
+      "stock_head": "RATIONS",
+      "criticality_tier": "T2",
+      "unit": "kg",
+      "unit_weight_kg": 1.0,
+      "unit_volume_l": 1.3,
+      "shelf_life_months": 12,
+      "consumption_baseline_per_soldier_per_day": {
+        "Plains": 0.090,
+        "HA": 0.100,
+        "SHA": 0.110,
+        "ECC": 0.120
+      },
+      "winter_uplift_factor": 1.0,
+      "substitution_allowed_with": [],
+      "provenance_grade": "A"
+    },
+    {
+      "sku_id": "SKU-RAT-004",
+      "name": "Cooking oil (refined)",
+      "stock_head": "RATIONS",
+      "criticality_tier": "T2",
+      "unit": "litre",
+      "unit_weight_kg": 0.92,
+      "unit_volume_l": 1.0,
+      "shelf_life_months": 9,
+      "consumption_baseline_per_soldier_per_day": {
+        "Plains": 0.040,
+        "HA": 0.045,
+        "SHA": 0.055,
+        "ECC": 0.065
+      },
+      "winter_uplift_factor": 1.1,
+      "substitution_allowed_with": [],
+      "provenance_grade": "A"
+    },
+    {
+      "sku_id": "SKU-RAT-005",
+      "name": "Fresh meat (frozen, boneless)",
+      "stock_head": "RATIONS",
+      "criticality_tier": "T3",
+      "unit": "kg",
+      "unit_weight_kg": 1.0,
+      "unit_volume_l": 1.1,
+      "shelf_life_months": 6,
+      "shelf_life_note": "Cold-chain dependent; effective shelf life shorter at forward posts without reliable refrigeration.",
+      "consumption_baseline_per_soldier_per_day": {
+        "Plains": 0.180,
+        "HA": 0.180,
+        "SHA": 0.180,
+        "ECC": 0.180
+      },
+      "winter_uplift_factor": 1.0,
+      "substitution_allowed_with": [],
+      "provenance_grade": "B",
+      "provenance_note": "Fresh meat is a documented entitlement (ASC). Cold-chain limitations at SHA are publicly discussed in CAG audits."
+    },
+
+    {
+      "sku_id": "SKU-POL-001",
+      "name": "HSD (High Speed Diesel)",
+      "stock_head": "POL",
+      "criticality_tier": "T1",
+      "unit": "litre",
+      "unit_weight_kg": 0.84,
+      "unit_volume_l": 1.0,
+      "shelf_life_months": 12,
+      "consumption_unit": "litre per vehicle-km OR litre per generator-hour",
+      "consumption_baseline_per_vehicle_km": {
+        "Stallion_loaded": 0.42,
+        "Stallion_empty": 0.30,
+        "Topaz_loaded": 0.55,
+        "ALS_loaded": 0.38
+      },
+      "consumption_baseline_per_generator_hour": 4.0,
+      "altitude_derate_per_1000m_above_3000m": 0.04,
+      "winter_uplift_factor": 1.15,
+      "substitution_allowed_with": [],
+      "provenance_grade": "A",
+      "provenance_note": "Vehicle fuel-burn rates are public from manufacturer specs (Ashok Leyland, Tata). Altitude derate principle is publicly documented in vehicle manuals."
+    },
+    {
+      "sku_id": "SKU-POL-002",
+      "name": "Kerosene (SKO) for heating and cooking",
+      "stock_head": "POL",
+      "criticality_tier": "T1",
+      "unit": "litre",
+      "unit_weight_kg": 0.81,
+      "unit_volume_l": 1.0,
+      "shelf_life_months": 18,
+      "consumption_unit": "litre per soldier per day (heating + cooking)",
+      "consumption_baseline_per_soldier_per_day": {
+        "Plains": 0.20,
+        "HA": 0.80,
+        "SHA": 1.80,
+        "ECC": 2.40
+      },
+      "winter_uplift_factor": 1.6,
+      "winter_uplift_note": "Winter uplift is dominated by heating-hours-per-day, which spike at SHA/ECC posts.",
+      "substitution_allowed_with": [],
+      "provenance_grade": "A",
+      "provenance_note": "Kerosene/SKO is the dominant SHA consumable per multiple CAG and Parliament Standing Committee reports. Multiplier shape is illustrative but matches the publicly discussed pattern (3-4x HA over plains; further multiplier at SHA in winter)."
+    },
+    {
+      "sku_id": "SKU-POL-003",
+      "name": "ATF (Aviation Turbine Fuel)",
+      "stock_head": "POL",
+      "criticality_tier": "T2",
+      "unit": "litre",
+      "unit_weight_kg": 0.81,
+      "unit_volume_l": 1.0,
+      "shelf_life_months": 12,
+      "consumption_unit": "litre per helicopter sortie",
+      "consumption_baseline_per_sortie": {
+        "Mi-17_typical_sortie": 1100,
+        "Cheetah_typical_sortie": 240,
+        "Chinook_typical_sortie": 2400
+      },
+      "altitude_derate_per_1000m_above_3000m": 0.06,
+      "winter_uplift_factor": 1.1,
+      "substitution_allowed_with": [],
+      "provenance_grade": "A",
+      "provenance_note": "Aircraft fuel consumption is public from manufacturer/IAF documentation."
+    },
+    {
+      "sku_id": "SKU-POL-004",
+      "name": "Petrol (MS / Motor Spirit)",
+      "stock_head": "POL",
+      "criticality_tier": "T2",
+      "unit": "litre",
+      "unit_weight_kg": 0.74,
+      "unit_volume_l": 1.0,
+      "shelf_life_months": 6,
+      "consumption_unit": "litre per light-vehicle-km",
+      "consumption_baseline_per_vehicle_km": {
+        "Maruti_Gypsy": 0.10,
+        "Mahindra_ALSV": 0.13,
+        "generator_small": 0.8
+      },
+      "altitude_derate_per_1000m_above_3000m": 0.05,
+      "winter_uplift_factor": 1.05,
+      "substitution_allowed_with": [],
+      "provenance_grade": "A"
+    },
+    {
+      "sku_id": "SKU-POL-005",
+      "name": "Lubricants pack (engine oil + grease + ATF)",
+      "stock_head": "POL",
+      "criticality_tier": "T2",
+      "unit": "pack",
+      "unit_weight_kg": 5.0,
+      "unit_volume_l": 5.5,
+      "shelf_life_months": 24,
+      "consumption_unit": "packs per vehicle per quarter",
+      "consumption_baseline_per_vehicle_per_quarter": {
+        "Stallion": 0.4,
+        "Topaz": 0.5,
+        "ALS": 0.35
+      },
+      "winter_uplift_factor": 1.2,
+      "winter_uplift_note": "Cold-weather lubricant viscosity grades require more frequent change.",
+      "substitution_allowed_with": [],
+      "provenance_grade": "B",
+      "provenance_note": "Vehicle lubricant scales of issue are publicly hinted at via CAG vehicle audits."
+    },
+
+    {
+      "sku_id": "SKU-AMM-001",
+      "name": "5.56x45mm Ball (INSAS / AK-203 family)",
+      "stock_head": "AMMO",
+      "criticality_tier": "T2",
+      "unit": "round",
+      "unit_weight_kg": 0.012,
+      "unit_volume_l": 0.008,
+      "shelf_life_months": 240,
+      "consumption_unit": "rounds per soldier per day (peacetime training scale)",
+      "consumption_baseline_per_soldier_per_day": {
+        "Plains": 1.5,
+        "HA": 0.8,
+        "SHA": 0.5,
+        "ECC": 0.4
+      },
+      "winter_uplift_factor": 1.0,
+      "combat_uplift_note": "Combat-scale consumption is 50-200x peacetime; not modelled in this demo's baseline.",
+      "substitution_allowed_with": [],
+      "provenance_grade": "A",
+      "provenance_note": "5.56x45 NATO is publicly documented as Indian Army standard small-arms ammunition (INSAS, AK-203 procurements)."
+    },
+    {
+      "sku_id": "SKU-AMM-002",
+      "name": "7.62x51mm NATO (MMG link)",
+      "stock_head": "AMMO",
+      "criticality_tier": "T2",
+      "unit": "round",
+      "unit_weight_kg": 0.025,
+      "unit_volume_l": 0.014,
+      "shelf_life_months": 240,
+      "consumption_baseline_per_soldier_per_day": {
+        "Plains": 0.4,
+        "HA": 0.25,
+        "SHA": 0.15,
+        "ECC": 0.10
+      },
+      "winter_uplift_factor": 1.0,
+      "substitution_allowed_with": [],
+      "provenance_grade": "A"
+    },
+    {
+      "sku_id": "SKU-AMM-003",
+      "name": "81mm Mortar HE",
+      "stock_head": "AMMO",
+      "criticality_tier": "T2",
+      "unit": "round",
+      "unit_weight_kg": 4.2,
+      "unit_volume_l": 3.5,
+      "shelf_life_months": 180,
+      "consumption_unit": "rounds per mortar-equipped post per month (peacetime)",
+      "consumption_baseline_per_post_per_month": {
+        "training_scale": 6,
+        "deterrent_patrol_scale": 12
+      },
+      "winter_uplift_factor": 0.5,
+      "winter_uplift_note": "Reduced training fire in winter at SHA posts.",
+      "substitution_allowed_with": [],
+      "provenance_grade": "A"
+    },
+    {
+      "sku_id": "SKU-AMM-004",
+      "name": "105mm Field Gun HE",
+      "stock_head": "AMMO",
+      "criticality_tier": "T2",
+      "unit": "round",
+      "unit_weight_kg": 17.5,
+      "unit_volume_l": 12.0,
+      "shelf_life_months": 240,
+      "consumption_unit": "rounds per artillery-equipped sub-sector per quarter (peacetime)",
+      "consumption_baseline_per_subsector_per_quarter": 30,
+      "winter_uplift_factor": 0.4,
+      "substitution_allowed_with": [],
+      "provenance_grade": "A",
+      "provenance_note": "105mm Indian Field Gun and ammunition is publicly documented (DRDO/OFB procurement)."
+    },
+    {
+      "sku_id": "SKU-AMM-005",
+      "name": "ATGM round (Konkurs / Milan family)",
+      "stock_head": "AMMO",
+      "criticality_tier": "T2",
+      "unit": "round",
+      "unit_weight_kg": 26.0,
+      "unit_volume_l": 22.0,
+      "shelf_life_months": 120,
+      "consumption_unit": "rounds per ATGM-equipped post per year (peacetime)",
+      "consumption_baseline_per_post_per_year": 2,
+      "winter_uplift_factor": 0.0,
+      "winter_uplift_note": "ATGM training fire essentially nil at SHA in winter.",
+      "substitution_allowed_with": [],
+      "provenance_grade": "A"
+    },
+    {
+      "sku_id": "SKU-AMM-006",
+      "name": "40mm UBGL grenade HE",
+      "stock_head": "AMMO",
+      "criticality_tier": "T2",
+      "unit": "round",
+      "unit_weight_kg": 0.23,
+      "unit_volume_l": 0.18,
+      "shelf_life_months": 180,
+      "consumption_baseline_per_soldier_per_day": {
+        "Plains": 0.05,
+        "HA": 0.03,
+        "SHA": 0.02,
+        "ECC": 0.01
+      },
+      "winter_uplift_factor": 0.5,
+      "substitution_allowed_with": [],
+      "provenance_grade": "B"
+    },
+
+    {
+      "sku_id": "SKU-MED-001",
+      "name": "Field Dressing (large)",
+      "stock_head": "MEDICAL",
+      "criticality_tier": "T1",
+      "unit": "piece",
+      "unit_weight_kg": 0.08,
+      "unit_volume_l": 0.12,
+      "shelf_life_months": 60,
+      "consumption_unit": "pieces per 100 soldiers per month",
+      "consumption_baseline_per_100_soldiers_per_month": {
+        "Plains": 5,
+        "HA": 8,
+        "SHA": 12,
+        "ECC": 18
+      },
+      "winter_uplift_factor": 1.3,
+      "substitution_allowed_with": [],
+      "provenance_grade": "A"
+    },
+    {
+      "sku_id": "SKU-MED-002",
+      "name": "IV Fluid (Ringer's Lactate, 500ml)",
+      "stock_head": "MEDICAL",
+      "criticality_tier": "T1",
+      "unit": "bottle",
+      "unit_weight_kg": 0.55,
+      "unit_volume_l": 0.55,
+      "shelf_life_months": 24,
+      "consumption_unit": "bottles per 100 soldiers per month",
+      "consumption_baseline_per_100_soldiers_per_month": {
+        "Plains": 4,
+        "HA": 7,
+        "SHA": 11,
+        "ECC": 15
+      },
+      "winter_uplift_factor": 1.2,
+      "freeze_protection_required": true,
+      "substitution_allowed_with": [],
+      "provenance_grade": "A"
+    },
+    {
+      "sku_id": "SKU-MED-003",
+      "name": "Frostbite Treatment Kit",
+      "stock_head": "MEDICAL",
+      "criticality_tier": "T1",
+      "unit": "kit",
+      "unit_weight_kg": 0.4,
+      "unit_volume_l": 0.5,
+      "shelf_life_months": 36,
+      "consumption_unit": "kits per 100 soldiers per month",
+      "consumption_baseline_per_100_soldiers_per_month": {
+        "Plains": 0,
+        "HA": 0.2,
+        "SHA": 1.0,
+        "ECC": 2.5
+      },
+      "winter_uplift_factor": 3.0,
+      "winter_uplift_note": "Frostbite incidence is overwhelmingly winter-loaded.",
+      "substitution_allowed_with": [],
+      "provenance_grade": "B",
+      "provenance_note": "Frostbite case rates at SHA/ECC are discussed in CAG and Parliament Standing Committee reports; specific kit composition is illustrative."
+    },
+    {
+      "sku_id": "SKU-MED-004",
+      "name": "Oxygen Cylinder (D-size, medical)",
+      "stock_head": "MEDICAL",
+      "criticality_tier": "T1",
+      "unit": "cylinder",
+      "unit_weight_kg": 8.5,
+      "unit_volume_l": 6.0,
+      "shelf_life_months": 999,
+      "shelf_life_note": "No shelf life on the gas itself; cylinder hydro-test interval applies.",
+      "consumption_unit": "cylinders per post per month",
+      "consumption_baseline_per_post_per_month": {
+        "HA": 0,
+        "SHA": 2,
+        "ECC": 6
+      },
+      "winter_uplift_factor": 1.5,
+      "substitution_allowed_with": [],
+      "provenance_grade": "A",
+      "provenance_note": "Oxygen requirement at SHA/ECC for HAPE/HACE prophylaxis and treatment is publicly documented in Army Medical Corps materials."
+    },
+
+    {
+      "sku_id": "SKU-CLO-001",
+      "name": "Snow Goggles (UV-rated)",
+      "stock_head": "CLOTHING",
+      "criticality_tier": "T2",
+      "unit": "pair",
+      "unit_weight_kg": 0.15,
+      "unit_volume_l": 0.4,
+      "shelf_life_months": 60,
+      "consumption_unit": "pairs per soldier per year (wear-out + breakage)",
+      "consumption_baseline_per_soldier_per_year": {
+        "HA": 0.5,
+        "SHA": 1.5,
+        "ECC": 2.5
+      },
+      "winter_uplift_factor": 1.0,
+      "substitution_allowed_with": [],
+      "provenance_grade": "A",
+      "provenance_note": "Snow goggle issue rates and wear-out patterns are publicly discussed in CAG audits of high-altitude clothing."
+    },
+    {
+      "sku_id": "SKU-CLO-002",
+      "name": "ECC Gloves (extreme-cold mittens)",
+      "stock_head": "CLOTHING",
+      "criticality_tier": "T1",
+      "unit": "pair",
+      "unit_weight_kg": 0.45,
+      "unit_volume_l": 1.2,
+      "shelf_life_months": 60,
+      "consumption_unit": "pairs per soldier per year",
+      "consumption_baseline_per_soldier_per_year": {
+        "HA": 0.5,
+        "SHA": 1.5,
+        "ECC": 2.5
+      },
+      "winter_uplift_factor": 1.0,
+      "substitution_allowed_with": [],
+      "provenance_grade": "A"
+    },
+    {
+      "sku_id": "SKU-CLO-003",
+      "name": "Multi-layer trousers (HA-graded)",
+      "stock_head": "CLOTHING",
+      "criticality_tier": "T2",
+      "unit": "set",
+      "unit_weight_kg": 1.8,
+      "unit_volume_l": 4.0,
+      "shelf_life_months": 60,
+      "consumption_unit": "sets per soldier per year",
+      "consumption_baseline_per_soldier_per_year": {
+        "HA": 0.5,
+        "SHA": 1.0,
+        "ECC": 1.5
+      },
+      "winter_uplift_factor": 1.0,
+      "substitution_allowed_with": [],
+      "provenance_grade": "A"
+    },
+    {
+      "sku_id": "SKU-CLO-004",
+      "name": "Sleeping Bag (rated -40C, SHA-grade)",
+      "stock_head": "CLOTHING",
+      "criticality_tier": "T1",
+      "unit": "piece",
+      "unit_weight_kg": 3.5,
+      "unit_volume_l": 12.0,
+      "shelf_life_months": 60,
+      "consumption_unit": "pieces per soldier per 3 years",
+      "consumption_baseline_per_soldier_per_year": {
+        "HA": 0.2,
+        "SHA": 0.4,
+        "ECC": 0.6
+      },
+      "winter_uplift_factor": 1.0,
+      "substitution_allowed_with": [],
+      "provenance_grade": "A",
+      "provenance_note": "SHA/ECC sleeping bag procurement and shortages are extensively discussed in CAG performance audits."
+    },
+    {
+      "sku_id": "SKU-CLO-005",
+      "name": "Snow Boots (insulated, -40C rated)",
+      "stock_head": "CLOTHING",
+      "criticality_tier": "T1",
+      "unit": "pair",
+      "unit_weight_kg": 2.4,
+      "unit_volume_l": 4.5,
+      "shelf_life_months": 36,
+      "consumption_unit": "pairs per soldier per year",
+      "consumption_baseline_per_soldier_per_year": {
+        "HA": 0.4,
+        "SHA": 0.8,
+        "ECC": 1.2
+      },
+      "winter_uplift_factor": 1.0,
+      "substitution_allowed_with": [],
+      "provenance_grade": "A"
+    },
+    {
+      "sku_id": "SKU-CLO-006",
+      "name": "Balaclava + face mask combo (insulated)",
+      "stock_head": "CLOTHING",
+      "criticality_tier": "T2",
+      "unit": "set",
+      "unit_weight_kg": 0.18,
+      "unit_volume_l": 0.5,
+      "shelf_life_months": 36,
+      "consumption_unit": "sets per soldier per year",
+      "consumption_baseline_per_soldier_per_year": {
+        "HA": 0.5,
+        "SHA": 1.5,
+        "ECC": 2.5
+      },
+      "winter_uplift_factor": 1.0,
+      "substitution_allowed_with": [],
+      "provenance_grade": "B"
+    },
+
+    {
+      "sku_id": "SKU-GEN-001",
+      "name": "Battery 9V, military-spec",
+      "stock_head": "GENERAL",
+      "criticality_tier": "T2",
+      "unit": "piece",
+      "unit_weight_kg": 0.045,
+      "unit_volume_l": 0.04,
+      "shelf_life_months": 36,
+      "consumption_unit": "pieces per 100 soldiers per month",
+      "consumption_baseline_per_100_soldiers_per_month": {
+        "HA": 8,
+        "SHA": 14,
+        "ECC": 22
+      },
+      "winter_uplift_factor": 1.4,
+      "winter_uplift_note": "Battery capacity collapses in cold; SHA/ECC posts churn batteries fast.",
+      "substitution_allowed_with": [],
+      "provenance_grade": "B",
+      "provenance_note": "Cold-weather battery degradation is a publicly known field problem; specific consumption is illustrative."
+    },
+    {
+      "sku_id": "SKU-GEN-002",
+      "name": "Sandbags (jute, mil-spec)",
+      "stock_head": "GENERAL",
+      "criticality_tier": "T3",
+      "unit": "bag",
+      "unit_weight_kg": 0.5,
+      "unit_volume_l": 0.6,
+      "shelf_life_months": 24,
+      "consumption_unit": "bags per post per quarter (defensive position maintenance)",
+      "consumption_baseline_per_post_per_quarter": {
+        "static_post": 50,
+        "patrol_post": 20
+      },
+      "winter_uplift_factor": 0.3,
+      "winter_uplift_note": "Defensive works largely paused at SHA in winter.",
+      "substitution_allowed_with": [],
+      "provenance_grade": "C",
+      "provenance_note": "Generic; sandbags are universal but consumption pattern is illustrative."
+    },
+    {
+      "sku_id": "SKU-GEN-003",
+      "name": "Concertina wire (coil, 10m)",
+      "stock_head": "GENERAL",
+      "criticality_tier": "T3",
+      "unit": "coil",
+      "unit_weight_kg": 8.0,
+      "unit_volume_l": 18.0,
+      "shelf_life_months": 60,
+      "consumption_unit": "coils per post per year",
+      "consumption_baseline_per_post_per_year": {
+        "static_post": 4,
+        "patrol_post": 1
+      },
+      "winter_uplift_factor": 0.0,
+      "substitution_allowed_with": [],
+      "provenance_grade": "B"
+    },
+    {
+      "sku_id": "SKU-GEN-004",
+      "name": "Radio Spare Battery (manpack VHF)",
+      "stock_head": "GENERAL",
+      "criticality_tier": "T2",
+      "unit": "battery",
+      "unit_weight_kg": 0.85,
+      "unit_volume_l": 0.6,
+      "shelf_life_months": 36,
+      "consumption_unit": "batteries per 100 soldiers per month",
+      "consumption_baseline_per_100_soldiers_per_month": {
+        "HA": 4,
+        "SHA": 8,
+        "ECC": 14
+      },
+      "winter_uplift_factor": 1.5,
+      "substitution_allowed_with": [],
+      "provenance_grade": "B"
+    }
+  ]
+}
