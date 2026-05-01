@@ -1,0 +1,407 @@
+{
+  "_meta": {
+    "artifact": "bastion_fsp_scenarios",
+    "version": "wk6_v1_locked",
+    "depends_on": [
+      "posts.json (wk6_v1_locked)",
+      "routes.json (wk6_v1_locked)",
+      "skus.json (wk6_v1_locked)",
+      "vehicles.json (wk6_v1_locked)"
+    ],
+    "design_notes": [
+      "Three scripted scenarios chosen to span three different *types* of operational stress.",
+      "S1 = steady-state surfacing (no crisis; system finds non-obvious latent risk).",
+      "S2 = predictable seasonal disruption with full cascade (the demo headliner).",
+      "S3 = compound failure across a different dimension (vehicle reliability) showing the platform isn't a one-trick weather model.",
+      "Each scenario has a 90-day window with daily state computed for focal posts and SKUs.",
+      "Cascade chains are explicit: disruption -> route impact -> alternate viability -> downstream stockout -> resupply recommendation.",
+      "Resupply options (3 per critical event) span cost / time / risk space so the operator chooses, the system doesn't decide."
+    ],
+    "headcount_assumptions": {
+      "rationale": "Real headcount per post is operationally sensitive even at the unclassified level. Scenario-internal notional headcounts used here are illustrative central estimates for post type and operational tempo.",
+      "values": {
+        "POST-001 DBO Base":       150,
+        "POST-002 Murgo Sub-Base":  80,
+        "POST-003 FOB Galwan":     120,
+        "POST-004 PP-North-1":      40,
+        "POST-005 Chushul Garrison": 250,
+        "POST-006 Rezang La OP":    35,
+        "POST-007 Spanggur Gap":    50,
+        "POST-008 Finger Area OP":  40,
+        "POST-009 Hanle Forward":  100,
+        "POST-010 Demchok Picket":  50,
+        "POST-011 Loma Sub-Base":   60,
+        "POST-012 Drass Garrison": 300,
+        "POST-013 Kargil Sector HQ": 1200,
+        "POST-014 Mushkoh Valley OP": 40,
+        "POST-015 Tiger Hill OP":   40
+      }
+    },
+    "demo_starting_inventory_assumptions": {
+      "rationale": "Demo Day-0 inventory is set so each scenario produces operationally interesting horizons (~30-45 days to stockout). Real Army stocking levels follow War Wastage Reserves and seasonal pre-stocking doctrine that are not public.",
+      "approach": "Inventory at each focal post is set such that, under normal operations, post would not run out. Disruption events compress the horizon."
+    },
+    "math_methodology": {
+      "daily_projection": "stock_today = stock_yesterday - daily_burn(post, sku, season, terrain) + arrivals(post, sku, day) - losses(spoilage, freeze, etc.)",
+      "days_to_stockout": "ceil(stock_today / mean_daily_burn) given current trajectory",
+      "confidence_interval": "10/50/90 percentile bands on daily_burn estimates; widens with horizon",
+      "resupply_cost": "tonnes * cost_per_tonne_km * km, summed across edges in the plan",
+      "resupply_time": "max segment transit + handling time at each node",
+      "resupply_risk": "P[plan_completes] = product of segment_availability_P and vehicle_availability_P"
+    },
+    "demo_narrative_use": "The UI scrubs through the 90-day window. At each disruption event, the dashboard re-computes affected posts and pops the resupply-options card. The Brigadier picks one; the system shows lineage back to model and source data."
+  },
+
+  "scenarios": [
+
+    {
+      "scenario_id": "SCEN-01-NORMAL_OPS",
+      "title": "Normal operations baseline (late summer)",
+      "narrative_one_liner": "No crisis. System surfaces a latent vehicle-reliability risk on the DBO axis that's invisible to the operator at Day 0.",
+      "season_start": "August (Day 0 = 1 Aug)",
+      "duration_days": 90,
+      "weather_assumption": "Typical late-summer conditions. All passes open. IMD data baseline.",
+
+      "starting_state": {
+        "all_routes_open": true,
+        "all_passes_open": true,
+        "vehicle_fleet_full_strength": true,
+        "starting_inventory_focal_posts": {
+          "POST-001_DBO": {
+            "SKU-POL-002_kerosene_L": 15000,
+            "SKU-POL-001_HSD_L": 25000,
+            "SKU-RAT-001_composite_packs": 4500,
+            "SKU-MED-004_oxygen_cylinders": 24
+          }
+        }
+      },
+
+      "disruption_events": [
+        {
+          "day": 18,
+          "type": "vehicle_reliability_signal",
+          "description": "EME records show Stallion serial-batch 2019/05 (8 vehicles in the 12-truck DBO convoy pool) approaching 18-month service interval simultaneously. None deadlined yet, but failure-rate prior spikes from 1.8/1000vkm to 4.5/1000vkm.",
+          "data_source": "vehicles.json reliability_prior on summer_road_unpaved + maintenance interval crossing",
+          "operator_visibility_without_bastion": "low — quartermaster sees individual vehicle service dates, not aggregate convoy reliability"
+        },
+        {
+          "day": 35,
+          "type": "weather_minor",
+          "description": "3-day rain event blocks Shyok river crossings on DSDBO road. Convoys delay 2 days.",
+          "data_source": "IMD historical late-summer Shyok-crossing closure pattern",
+          "operator_visibility_without_bastion": "high — BRO bulletin issued"
+        },
+        {
+          "day": 52,
+          "type": "demand_uplift",
+          "description": "Pre-winter stockpiling order from MGS branch: bring DBO winter kerosene reserve to 30,000L by Day 75. Demand triples for 23 days.",
+          "data_source": "Standard pre-winter doctrine; MGS directive cycle is publicly documented",
+          "operator_visibility_without_bastion": "high — explicit order"
+        }
+      ],
+
+      "focal_post_projection": {
+        "post_id": "POST-001",
+        "post_name": "DBO Base",
+        "headcount": 150,
+        "terrain_class": "ECC",
+        "season": "summer (no winter uplift)",
+        "focal_skus": ["SKU-POL-002", "SKU-POL-001"],
+
+        "kerosene_daily_burn_L": 360,
+        "kerosene_burn_calc": "150 hc x 2.4 L/soldier/day (ECC) x 1.0 winter_uplift (off-season) = 360 L/day",
+
+        "key_projection_days": {
+          "day_0":  {"kerosene_stock_L": 15000, "days_to_stockout_at_current_burn": 42, "status": "ok"},
+          "day_18": {"kerosene_stock_L": 8520,  "days_to_stockout_at_current_burn": 24, "status": "ok", "note": "convoy arrived day 14 with 5kL"},
+          "day_35": {"kerosene_stock_L": 4400,  "days_to_stockout_at_current_burn": 12, "status": "watch", "note": "Shyok closure delays planned convoy"},
+          "day_38": {"kerosene_stock_L": 12500, "days_to_stockout_at_current_burn": 35, "status": "ok", "note": "delayed convoy arrives, 9kL delivered"},
+          "day_52": {"kerosene_stock_L": 7460,  "days_to_stockout_at_current_burn": 21, "status": "ok", "note": "MGS pre-winter directive issued, demand triples"},
+          "day_60": {"kerosene_stock_L": 4500,  "days_to_stockout_at_current_burn": 4,  "status": "critical", "note": "without surge resupply, stockout day 64"},
+          "day_75": {"kerosene_stock_L": 28000, "days_to_stockout_at_current_burn": 78, "status": "ok", "note": "surge convoys completed; reserve at target"}
+        }
+      },
+
+      "system_recommendation_at_day_18": {
+        "trigger": "Vehicle reliability prior crosses threshold for DBO convoy pool",
+        "non_obvious_insight": "8 of 12 DBO-axis Stallions hitting service interval in a 6-week window. Probability that 3+ simultaneously deadline before Day 75 surge: 67%.",
+        "recommended_action": "Stagger preventive maintenance over Days 19-40 to avoid concurrent deadlining. Coordinate with EME workshop at Karu to ensure 9-vehicle minimum availability throughout Day 52-75 surge window.",
+        "operator_value": "This insight is invisible without aggregating EME service records against forecast demand. Surfacing it 17 days before any vehicle actually fails is the platform's value proposition in a single example."
+      }
+    },
+
+    {
+      "scenario_id": "SCEN-02-ZOJI_LA_CASCADE",
+      "title": "Zoji La closes early; Manali already shut; Kargil cluster cascades",
+      "narrative_one_liner": "Late October blizzard closes Zoji La 3 weeks earlier than expected. Manali road already shut. Kargil cluster has 27 days of kerosene. Air bridge is the only inbound option but already at capacity for Leh resupply.",
+      "season_start": "October (Day 0 = 15 Oct)",
+      "duration_days": 90,
+      "weather_assumption": "Severe early-winter onset. IMD anomaly: blizzard event on Day 5 brings 1.2m snow at Zoji La, closing it 3 weeks before historical median closure.",
+
+      "starting_state": {
+        "all_routes_open": false,
+        "open_routes": ["LOC-WEST_ZOJILA", "LOC-AIR_LEH"],
+        "closed_routes": ["LOC-SOUTH_MANALI"],
+        "closed_routes_reason": "Manali-Leh closes ~mid-Oct annually due to Baralacha and Taglang La snow. Closed since Day -8 (Oct 7).",
+        "starting_inventory_focal_posts": {
+          "POST-013_Kargil_HQ": {
+            "SKU-POL-002_kerosene_L": 60000,
+            "comment": "Kargil cluster aggregate stock: 60kL serves Kargil HQ + Drass + Mushkoh + Tiger Hill. Set to produce ~27-day horizon for demo tension."
+          }
+        }
+      },
+
+      "disruption_events": [
+        {
+          "day": 5,
+          "type": "weather_severe",
+          "description": "Blizzard at Zoji La. 1.2m snow in 36 hours. BRO declares pass closed. Z-Morh tunnel still under construction; no all-weather alternate.",
+          "data_source": "Modelled on IMD historical anomaly events; closure mechanism documented in BRO Beacon bulletins",
+          "operator_visibility_without_bastion": "high — BRO closure announcement",
+          "route_impacts": {
+            "EDGE-ZOJI-LEH": "closed",
+            "EDGE-ZOJI-KARGIL": "closed",
+            "implication": "Kargil cluster is now fed only via Leh, which itself is now fed only by air"
+          }
+        },
+        {
+          "day": 12,
+          "type": "demand_recognition",
+          "description": "System recognizes Kargil cluster has 27 days of kerosene at current burn. Posts a critical alert.",
+          "data_source": "Daily projection (this artifact)",
+          "operator_visibility_without_bastion": "low — aggregating across 4 posts and projecting against actual winter consumption rates is not a manual exercise",
+          "non_obvious_insight": "If Tiger Hill OP is excluded from cluster aggregate (because foot-only resupply means it operates on its own pre-positioned stock), Kargil HQ + Drass + Mushkoh runs out on Day 30. Tiger Hill independently has ~50 days because it pre-stocks for full winter."
+        },
+        {
+          "day": 18,
+          "type": "secondary_disruption",
+          "description": "Heavy snow at Drass adds 30% local heating demand for 2 weeks. Cluster burn rises from 2,189 L/day to 2,615 L/day.",
+          "data_source": "IMD Drass historical winter cold-snap pattern",
+          "operator_visibility_without_bastion": "medium — local commander reports increased demand but doesn't aggregate cluster-wide",
+          "horizon_impact": "Days-to-stockout collapses from 23 to 18"
+        }
+      ],
+
+      "focal_cluster_projection": {
+        "cluster_name": "Kargil cluster (Sector 8 Mtn Div west)",
+        "cluster_posts": ["POST-013", "POST-012", "POST-014", "POST-015"],
+        "cluster_total_headcount": 1580,
+        "focal_sku": "SKU-POL-002 (Kerosene)",
+        "winter_uplift_factor": 1.6,
+
+        "daily_burn_L_by_post": {
+          "POST-013_Kargil_HQ_HA":   {"hc": 1200, "burn_L_per_day": 1536, "calc": "1200 x 0.80 x 1.6"},
+          "POST-012_Drass_HA":       {"hc": 300,  "burn_L_per_day": 384,  "calc": "300 x 0.80 x 1.6"},
+          "POST-014_Mushkoh_SHA":    {"hc": 40,   "burn_L_per_day": 115,  "calc": "40 x 1.80 x 1.6"},
+          "POST-015_Tiger_Hill_ECC": {"hc": 40,   "burn_L_per_day": 154,  "calc": "40 x 2.40 x 1.6"}
+        },
+        "cluster_burn_total_L_per_day": 2189,
+
+        "key_projection_days": {
+          "day_0":  {"cluster_stock_L": 60000, "days_to_stockout": 27, "status": "watch", "note": "27 days assumes baseline burn; cluster is healthy"},
+          "day_5":  {"cluster_stock_L": 49055, "days_to_stockout": 22, "status": "watch", "note": "Zoji La closes; alternate analysis triggered"},
+          "day_12": {"cluster_stock_L": 33732, "days_to_stockout": 15, "status": "critical", "note": "system raises alert; recommends air resupply via Leh-Kargil road"},
+          "day_18": {"cluster_stock_L": 20598, "days_to_stockout": 8,  "status": "critical", "note": "Drass cold-snap adds 426 L/day demand; horizon collapses"},
+          "day_22": {"cluster_stock_L": 10138, "days_to_stockout": 4,  "status": "imminent", "note": "without resupply by Day 26, posts begin rationing"},
+          "day_26": {"cluster_stock_L": 64778, "days_to_stockout": 25, "status": "ok", "note": "55kL emergency airlift completes via Leh-Kargil road; reserve restored"}
+        }
+      },
+
+      "resupply_options_at_day_12_alert": {
+        "context": "Kargil cluster needs ~55kL kerosene delivered by Day 25. Both road LoCs from Srinagar are closed. Must originate from air bridge to Leh, then truck Leh-Kargil.",
+        "options": [
+          {
+            "option_id": "OPT-S2-A",
+            "name": "Heavy-air priority lift",
+            "plan": "5x C-17 Hindon-Leh sorties + 1x Stallion convoy Leh-Kargil",
+            "tonnes_delivered": 55,
+            "cost_INR_lakhs": 18.5,
+            "cost_breakdown": "C-17 air at 8.5 INR/tonne-km baseline x 720km x 55t + truck Leh-Kargil at 0.45 baseline x 200km x 55t",
+            "time_days": 6,
+            "risk_P_complete": 0.78,
+            "risk_drivers": "C-17 weather availability at Leh (winter clear-weather availability ~0.75); Leh-Kargil road ice in mid-Oct",
+            "why_recommended": "Fastest. Highest payload-per-sortie. Frees Mi-17 fleet for forward ALG resupply. But: pulls C-17 from competing Leh-Corps-replenishment task."
+          },
+          {
+            "option_id": "OPT-S2-B",
+            "name": "Distributed Mi-17 lift",
+            "plan": "12x Mi-17 Hindon-Leh sorties + 1x Stallion convoy Leh-Kargil",
+            "tonnes_delivered": 55,
+            "cost_INR_lakhs": 25.0,
+            "cost_breakdown": "Mi-17 at 9.0 INR/tonne-km x 720km x 55t + truck portion same as A",
+            "time_days": 9,
+            "risk_P_complete": 0.85,
+            "risk_drivers": "Mi-17 winter clear-weather availability ~0.78 but more airframes available; spread across 12 sorties = lower per-sortie criticality",
+            "why_recommended": "Higher reliability than C-17 path because losing 1 Mi-17 sortie costs 8% of plan vs 20% for C-17. Costlier but safer when air conditions are marginal."
+          },
+          {
+            "option_id": "OPT-S2-C",
+            "name": "Reduce demand + stretched lift",
+            "plan": "Ration kerosene to 75% at Kargil HQ + Drass for 14 days (saves 5.4kL); 8x C-17 sorties over 12 days; 2 truck convoys",
+            "tonnes_delivered": 50,
+            "cost_INR_lakhs": 14.2,
+            "cost_breakdown": "Lower volume (50t vs 55t) plus stretched timeline reduces priority surcharge",
+            "time_days": 12,
+            "risk_P_complete": 0.92,
+            "risk_drivers": "Longest weather window across multiple sortie days = most robust",
+            "why_recommended": "Cheapest. Highest reliability. Cost: 14 days of reduced heating at Kargil HQ + Drass means soldier comfort impact and modest health risk. Acceptable at HA but not at SHA/ECC posts (which keep full ration). Only viable if Brigadier accepts comfort tradeoff."
+          }
+        ],
+        "tradeoff_summary": "Speed vs reliability vs human comfort. A is fastest but riskiest. C is cheapest and most reliable but trades soldier comfort. B is the middle path. The system does not pick — the Brigadier picks."
+      }
+    },
+
+    {
+      "scenario_id": "SCEN-03-VEHICLE_DEADLINE_CASCADE",
+      "title": "Three Stallions deadline at Karu the week the DBO surge convoy departs",
+      "narrative_one_liner": "Mid-September, planned 12-Stallion convoy to DBO is pre-winter kerosene + spares lift. Three Stallions deadline at Karu workshop in Days 8-10. Remaining 9 trucks at DBO altitude derate (5,065m) lift 55t instead of planned 73t. Below threshold for DBO winter readiness.",
+      "season_start": "September (Day 0 = 5 Sep)",
+      "duration_days": 90,
+      "weather_assumption": "Typical late-summer-early-autumn conditions. All passes still open. No weather disruption — this scenario tests the vehicle-reliability dimension specifically.",
+
+      "starting_state": {
+        "all_routes_open": true,
+        "all_passes_open": true,
+        "vehicle_fleet_full_strength": true,
+        "planned_dbo_surge_convoy": {
+          "departure_day": 14,
+          "vehicles": "12x Stallion",
+          "planned_payload_tonnes": 73.8,
+          "payload_calc": "12 x 7500kg x 0.82 (5065m derate) = 73,800kg",
+          "primary_cargo": "kerosene 45kL (36t) + diesel 12kL (10t) + spares + rations + ammunition + cold-weather kit"
+        },
+        "starting_inventory_focal_posts": {
+          "POST-001_DBO": {
+            "SKU-POL-002_kerosene_L": 12000,
+            "winter_target_kerosene_L": 50000,
+            "convoy_planned_to_deliver_L": 45000
+          }
+        }
+      },
+
+      "disruption_events": [
+        {
+          "day": 8,
+          "type": "vehicle_deadline",
+          "description": "Stallion serial 19/05/02 deadlined at Karu workshop — clutch failure during pre-convoy inspection.",
+          "data_source": "vehicles.json reliability prior; serial batch was flagged in S1 as approaching service interval",
+          "operator_visibility_without_bastion": "high — workshop reports it",
+          "fleet_impact": "11 of 12 trucks available"
+        },
+        {
+          "day": 9,
+          "type": "vehicle_deadline",
+          "description": "Stallion serial 19/05/04 deadlined at Karu — engine compression test fail.",
+          "fleet_impact": "10 of 12 trucks available"
+        },
+        {
+          "day": 10,
+          "type": "vehicle_deadline",
+          "description": "Stallion serial 19/05/07 deadlined at Karu — gearbox seizure during loading.",
+          "fleet_impact": "9 of 12 trucks available; convoy capacity drops to 55.4t (from 73.8t planned)"
+        }
+      ],
+
+      "focal_post_projection": {
+        "post_id": "POST-001",
+        "post_name": "DBO Base",
+        "headcount": 150,
+        "terrain_class": "ECC",
+        "season": "transitioning summer to winter (assumed Day 30 onwards = winter rates)",
+
+        "kerosene_burn_phases": {
+          "summer_days_0_29":   {"daily_burn_L": 360,  "calc": "150 hc x 2.4 L/soldier/day"},
+          "winter_days_30_plus": {"daily_burn_L": 576, "calc": "150 hc x 2.4 x 1.6 winter_uplift"}
+        },
+
+        "key_projection_days": {
+          "day_0":  {"kerosene_stock_L": 12000, "days_to_stockout_summer_burn": 33, "status": "watch"},
+          "day_14": {"kerosene_stock_L": 6960,  "days_to_stockout_summer_burn": 19, "status": "watch", "note": "convoy departs Karu; arrives Day 16"},
+          "day_16": {
+            "kerosene_stock_L_if_full_convoy": 41460,
+            "kerosene_stock_L_actual": 31460,
+            "actual_stock_calc": "6960 - (16x360) + 27000 [9 trucks at derated kerosene fraction] = 31460",
+            "days_to_winter_stockout_actual": 24,
+            "winter_target_60kL_gap_L": 28540,
+            "status": "critical_for_winter_readiness",
+            "note": "Convoy delivered short. Winter stockpile target missed by 28kL."
+          },
+          "day_30": {
+            "kerosene_stock_L": 26420,
+            "days_to_stockout_winter_burn": 46,
+            "status": "watch",
+            "note": "winter rates engaged; horizon adequate but below winter doctrine target"
+          },
+          "day_45": {
+            "kerosene_stock_L": 17780,
+            "days_to_stockout_winter_burn": 31,
+            "status": "watch",
+            "note": "approaching DSDBO road closure window; remaining road resupply opportunities limited"
+          },
+          "day_60": {
+            "kerosene_stock_L": 9140,
+            "days_to_stockout_winter_burn": 16,
+            "status": "critical",
+            "note": "DSDBO marginal; air bridge dependence rising"
+          },
+          "day_75_with_remediation": {
+            "kerosene_stock_L": 35000,
+            "note": "if remediation plan executed (see resupply options), reaches winter-safe levels"
+          }
+        }
+      },
+
+      "resupply_options_at_day_10_alert": {
+        "context": "Three Stallions deadlined at Karu; planned DBO convoy capacity dropped 25%. Need to make up 18.4 tonnes of cargo before DSDBO road closes (~Day 60-75 typical).",
+        "options": [
+          {
+            "option_id": "OPT-S3-A",
+            "name": "Borrow Stallions from Pangong-Chushul tasking",
+            "plan": "Pull 3x Stallions from POST-005 Chushul resupply pool (which has stocked light for the season); restore 12-truck convoy; depart Day 14 as planned",
+            "tonnes_delivered": 73.8,
+            "cost_INR_lakhs": 0,
+            "cost_note": "no incremental cost — uses already-funded fleet differently",
+            "time_days": 0,
+            "risk_P_complete": 0.65,
+            "risk_drivers": "Pangong-Chushul cluster now under-resourced; if a contingency emerges there in next 30 days, no slack. Low probability but high consequence if it hits.",
+            "why_recommended": "Fastest. No incremental cost. Best if Pangong-Chushul forecast is quiet. Worst if it isn't."
+          },
+          {
+            "option_id": "OPT-S3-B",
+            "name": "Two-trip plan — original + makeup convoy",
+            "plan": "9-truck convoy departs Day 14 as planned (55.4t); second 4-truck convoy of expedited spares + makeup load departs Day 28 (after first 3 deadlined trucks return to service at Karu workshop, ~Day 25)",
+            "tonnes_delivered": 79,
+            "tonnes_breakdown": "55.4t day 14 + 23.6t day 28",
+            "cost_INR_lakhs": 8.4,
+            "cost_breakdown": "Second convoy round trip Karu-DBO 510km x 4 trucks x 1.9 INR/tonne-km baseline x 23.6t",
+            "time_days": 14,
+            "risk_P_complete": 0.82,
+            "risk_drivers": "DSDBO road open through Day 28 has 92% historical probability in mid-September (IMD). EME workshop turnaround on 3 deadlined trucks: 90% within 18 days.",
+            "why_recommended": "Compromise option. Two convoy windows hedge against single-event risk. Modest cost. No fleet displacement from other taskings."
+          },
+          {
+            "option_id": "OPT-S3-C",
+            "name": "Heavy-air supplement",
+            "plan": "9-truck convoy as planned + 4x Mi-17 sorties Leh-DBO ALG carrying 4t each (high-priority kerosene + spares only)",
+            "tonnes_delivered": 71.4,
+            "tonnes_breakdown": "55.4t convoy + 16t Mi-17 (palletized kerosene + spares)",
+            "cost_INR_lakhs": 19.6,
+            "cost_breakdown": "Mi-17 at 9.0 INR/tonne-km x 100km Leh-DBO x 16t (after derate) + truck convoy normal",
+            "time_days": 5,
+            "risk_P_complete": 0.88,
+            "risk_drivers": "Mi-17 summer clear-weather availability 0.88; multiple sorties give resilience",
+            "why_recommended": "Highest reliability. Spreads risk across two delivery modes. Costliest."
+          }
+        ],
+        "tradeoff_summary": "A is risky (depletes elsewhere), B is balanced, C is robust. Cost ratio A:B:C is 0:1:2.3. Reliability ratio is 0.65:0.82:0.88. Different Brigadiers will choose differently — that's the point."
+      }
+    }
+  ],
+
+  "cross_scenario_demo_value": [
+    "S1 surfaces a vehicle-reliability insight invisible without aggregation; S3 dramatizes the same risk realized.",
+    "S2 demonstrates the cascade chain across 3+ depths (weather -> route -> alternate -> downstream stockout -> resupply choice).",
+    "All three end with the operator choosing among 3 options, not the system deciding. Decision-support, not decision-replacement.",
+    "Kerosene appears in 2 of 3 as the focal SKU because it's genuinely the dominant SHA/ECC consumable; this is a feature, not repetition."
+  ]
+}
