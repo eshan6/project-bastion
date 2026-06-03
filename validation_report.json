@@ -1,0 +1,154 @@
+{
+  "seed": 42,
+  "horizon_days": 1096,
+  "rows_total": 2350274,
+  "weather": {
+    "leh_jan_t_min_mean": -13.8,
+    "leh_jan_t_min_imd_prior": -14.0,
+    "leh_aug_t_max_mean": 22.8,
+    "leh_aug_t_max_imd_prior": 24.2,
+    "leh_annual_precip_mm": 127.2,
+    "leh_annual_precip_prior_range_mm": [
+      50.0,
+      130.0
+    ],
+    "tangtse_jan_t_min_mean": -15.2,
+    "tangtse_jan_t_min_prior_extrap": -16.9,
+    "tangtse_annual_precip_mm": 145.1,
+    "tangtse_annual_precip_prior_range_mm": [
+      80.0,
+      180.0
+    ],
+    "dbo_jan_t_min_mean": -24.6,
+    "dbo_jan_t_min_lapse_expected": -24.1
+  },
+  "disruption": {
+    "zoji_avg_seasonal_duration_days": 51.2,
+    "zoji_seasonal_prior_range_days": [
+      33,
+      130
+    ],
+    "zoji_seasonal_count_total": 4,
+    "zoji_total_closed_days_per_yr": 74.7,
+    "khardung_closed_days_per_yr": 24.7,
+    "khardung_prior_closed_days_per_yr": [
+      10,
+      30
+    ],
+    "chang_closed_days_per_yr": 35.0,
+    "chang_prior_closed_days_per_yr": [
+      10,
+      35
+    ],
+    "tsaka_closed_days_per_yr": 23.7,
+    "marsimik_closed_days_per_yr": 57.3,
+    "marsimik_prior_closed_days_per_yr": [
+      25,
+      70
+    ]
+  },
+  "consumption": {
+    "kerosene_jan_to_jul_ratio_DBO_5050m": 3.3,
+    "kerosene_jan_to_jul_ratio_all_forward_avg": 3.1,
+    "kerosene_seasonality_prior": "3-6x at deepest-cold posts (Tribune 'colossal' winter vs summer)",
+    "ammo_crisis_to_normal_ratio": 3.42,
+    "ammo_tempo_prior": "3.5x at crisis (TEMPO_AMMO_MULT)",
+    "kerosene_isolation_boost_observed_naive": 2.39,
+    "kerosene_isolation_boost_prior_naive": 1.3,
+    "kerosene_isolation_note": "Observed > prior because isolation events correlate with extreme cold; cold-coupling stacks with isolation boost. Decomposing the two requires controlling for T_mean \u2014 leave this for the model to disentangle.",
+    "peak_daily_brigade_kerosene_L": 59079.0,
+    "peak_per_soldier_L": 4.83,
+    "kerosene_realism_note": "Underground dumps store 400,000 L each (Swarajyamag). Brigade peak under 1 L/soldier/day-equivalent is realistic; spikes from concentrated isolated forward posts can drive higher."
+  },
+  "vehicles": {
+    "events_per_vehicle_3yr": 1.82,
+    "events_per_vehicle_prior": "1-3 deadlines per vehicle over 3yr at HA conditions",
+    "winter_event_share": 0.61,
+    "winter_event_share_prior": "\u22480.50 (3.2x base hazard in winter, with 5/12 winter months \u2248 0.57)",
+    "depot_repair_share": 0.34,
+    "depot_repair_share_prior": 0.35,
+    "mean_repair_days": 3.2,
+    "deadlines_per_day_brigade": 0.41,
+    "fleet_size": 249
+  },
+  "stock": {
+    "forward_postsku_winter_survival_rate": 0.854,
+    "forward_survival_target": [
+      0.85,
+      0.9
+    ],
+    "stockout_head_share": {
+      "Ammunition": 0.193,
+      "Clothing": 0.037,
+      "Engineer": 0.053,
+      "Medical": 0.097,
+      "POL": 0.133,
+      "Rations": 0.487
+    },
+    "stockout_pol_share": 0.133,
+    "stockout_perishable_share": 0.336,
+    "stockout_concentration_note": "Decision 2: shortfalls should concentrate in POL + perishables.",
+    "aws_attainment_mean": 0.91,
+    "aws_attainment_mean_target": 0.93,
+    "aws_attainment_p10_p90": [
+      0.74,
+      1.055
+    ],
+    "kerosene_P034_stock_peak_month": 10,
+    "kerosene_P034_stock_trough_month": 4,
+    "sawtooth_note": "Expect peak ~9-10 (post-AWS), trough ~3-4 (pre-thaw).",
+    "status_mix": {
+      "ok": 0.9541,
+      "rationing": 0.0325,
+      "stockout": 0.0135
+    },
+    "accounting_identity_max_residual": 0.001,
+    "rows": 1150800
+  },
+  "provenance": {
+    "config_version": "stage2_v1.1",
+    "generated_at": "2026-05-14",
+    "anchors": {
+      "weather": [
+        "IMD Leh (1901-2000 study)",
+        "Wikipedia Dras",
+        "Weather-Atlas Drass+Leh"
+      ],
+      "passes": [
+        "BRO PIB 1809806 (Zoji La 2022)",
+        "Tribune Mar 2026 BRO record",
+        "Wikipedia Khardung La/Chang La",
+        "Vargis Khan Ladakh winter roads"
+      ],
+      "consumption": [
+        "CAG Report 2017-18 Siachen/Ladakh",
+        "The Tribune 'Providing logistics in Ladakh' (Jan 2025)",
+        "Swarajyamag Oct 2020 Army winter prep"
+      ],
+      "stock_dynamics": [
+        "The Tribune 'Providing logistics in Ladakh' (Jan 2025) \u2014 AWS road-open-period bulk induction doctrine",
+        "Swarajyamag Oct 2020 \u2014 underground fuel dumps, pre-positioned winter-grade kerosene",
+        "CAG Report 2017-18 \u2014 shortfalls as audit-flagged exceptions, not steady state"
+      ],
+      "vehicles": [
+        "Tata/Ashok Leyland mil-spec sheets",
+        "Swarajyamag 6000-trucks figure",
+        "IDRW Stryker high-altitude trial failure (Mar 2025)"
+      ],
+      "orbat": [
+        "Wikipedia XIV Corps",
+        "SPS Land Forces 'Defending Eastern Ladakh' (Mar 2025)"
+      ]
+    },
+    "synthetic_arbitrary_flags": [
+      "Tangtse anchor station (extrapolated from Leh + lapse rate)",
+      "Tsaka La closure priors (regional-pattern inferred)",
+      "Marsimik La closure priors (elevation-scaled inference)",
+      "Vehicle Weibull shape/scale parameters (inferred from CAG deficiency patterns, no direct survival data)",
+      "AWS coverage targets in days-of-consumption (no public per-post stocking figures; calibrated so ~85-90% of post-SKUs enter winter adequately provisioned)",
+      "AWS attainment Beta distribution (shape inferred from CAG 'exception not norm' framing)",
+      "Routine convoy latency and refill thresholds (operationally plausible, no public source)",
+      "Spoilage daily fractions for perishables (order-of-magnitude estimate)"
+    ]
+  }
+}
