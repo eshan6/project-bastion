@@ -1,0 +1,19 @@
+{
+  "model_version": "stage3-v1.0",
+  "kind": "rule_weibull_altitude_v1",
+  "horizon_days": 7,
+  "altitude_hazard_multiplier": 0.0,
+  "axis_altitude_exposure": {
+    "Pangong": 0.35,
+    "DBO": 0.65,
+    "Chushul": 0.45,
+    "Demchok": 0.5,
+    "Hot_Springs": 0.55,
+    "Rear": 0.05
+  },
+  "synthetic_arbitrary_flags": [
+    "altitude_hazard_multiplier (0.4 placeholder)",
+    "axis_altitude_exposure fractions (operationally plausible)"
+  ],
+  "note": "Weibull shape and scale are read at runtime from the vehicles table; the scorer does not retrain them \u2014 it evaluates the analytic survival function with the parameters Stage 2 generated."
+}

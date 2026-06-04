@@ -1,66 +1,45 @@
-# env / secrets
-.env
-.env.local
-.envrc
-
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# venv
-.venv/
+# Virtual environments
 venv/
+.venv/
 env/
-ENV/
+.env
 
-# IDE
-.idea/
+# Editors / IDEs
 .vscode/
+.idea/
 *.swp
 *.swo
 .DS_Store
 
-# pytest / coverage
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-.cache/
-
-# bastion local data
-blobs/
-*.db
-*.sqlite
-mlruns/
-data/raw/
-data/curated/
-
-# embedded postgres scratch
-pg_data/
-*.pid
-
-# logs
-*.log
-logs/
-
-# notebooks
+# Jupyter
 .ipynb_checkpoints/
+*.ipynb
+
+# Generated data — uncomment if regenerating locally and you don't want to
+# track the snapshot. Default policy is: track the seed-42 snapshot so the
+# repo is "clone-and-run" without needing to regenerate. Override per-fork.
+# stage2_world/data/*.parquet
+
+# Stage 3 prediction outputs from arbitrary dates (only the canonical
+# 2024-12-15 sample is committed)
+stage3_models/output/snapshot_*
+!stage3_models/output/snapshot_2024-12-15/
+
+# Local environment overrides
+.env.local
+*.local
+
+# OS junk
+Thumbs.db
+desktop.ini

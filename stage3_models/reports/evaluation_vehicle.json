@@ -1,0 +1,44 @@
+{
+  "model_version": "stage3-v1.0",
+  "scorer_kind": "rule_weibull_altitude_v1",
+  "backtest_window": [
+    "2023-01-02",
+    "2024-12-23"
+  ],
+  "step_days": 7,
+  "horizon_days": 7,
+  "n_snapshots": 104,
+  "n_observations": 25896,
+  "n_actual_failures": 247,
+  "actual_failure_rate": 0.00954,
+  "predicted_failure_rate_mean": 0.01161,
+  "brier": 0.009482,
+  "brier_baseline_constant_rate": 0.009447,
+  "brier_skill_score_vs_baseline": -0.0037,
+  "calibration_buckets": [
+    {
+      "bucket": "(0.001, 0.005]",
+      "n": 1838,
+      "pred_mean": 0.00370657737487979,
+      "obs_rate": 0.012513601741022852
+    },
+    {
+      "bucket": "(0.005, 0.01]",
+      "n": 8132,
+      "pred_mean": 0.007824913087933774,
+      "obs_rate": 0.008484997540580424
+    },
+    {
+      "bucket": "(0.01, 0.02]",
+      "n": 14561,
+      "pred_mean": 0.013755132311360718,
+      "obs_rate": 0.00995810727285214
+    },
+    {
+      "bucket": "(0.02, 0.05]",
+      "n": 1365,
+      "pred_mean": 0.0219442677959958,
+      "obs_rate": 0.007326007326007326
+    }
+  ]
+}

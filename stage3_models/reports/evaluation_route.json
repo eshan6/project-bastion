@@ -1,0 +1,231 @@
+{
+  "model_version": "stage3-v1.0",
+  "n_models_trained": 20,
+  "train_end": "2024-06-30",
+  "test_window": [
+    "2024-07-01",
+    "2024-12-31"
+  ],
+  "models": [
+    {
+      "pass": "Zoji La",
+      "horizon_days": 1,
+      "n_train": 820,
+      "n_test": 183,
+      "train_open_rate": 0.752,
+      "test_open_rate": 0.902,
+      "AUC_open": 0.774,
+      "Brier": 0.1001,
+      "Brier_closed": 0.1001
+    },
+    {
+      "pass": "Zoji La",
+      "horizon_days": 3,
+      "n_train": 820,
+      "n_test": 181,
+      "train_open_rate": 0.755,
+      "test_open_rate": 0.901,
+      "AUC_open": 0.714,
+      "Brier": 0.0761,
+      "Brier_closed": 0.0761
+    },
+    {
+      "pass": "Zoji La",
+      "horizon_days": 7,
+      "n_train": 820,
+      "n_test": 177,
+      "train_open_rate": 0.76,
+      "test_open_rate": 0.898,
+      "AUC_open": 0.716,
+      "Brier": 0.0608,
+      "Brier_closed": 0.0608
+    },
+    {
+      "pass": "Zoji La",
+      "horizon_days": 14,
+      "n_train": 820,
+      "n_test": 170,
+      "train_open_rate": 0.768,
+      "test_open_rate": 0.894,
+      "AUC_open": 0.632,
+      "Brier": 0.0746,
+      "Brier_closed": 0.0746
+    },
+    {
+      "pass": "Khardung La",
+      "horizon_days": 1,
+      "n_train": 820,
+      "n_test": 183,
+      "train_open_rate": 0.93,
+      "test_open_rate": 0.918,
+      "AUC_open": 0.767,
+      "Brier": 0.0931,
+      "Brier_closed": 0.0931
+    },
+    {
+      "pass": "Khardung La",
+      "horizon_days": 3,
+      "n_train": 820,
+      "n_test": 181,
+      "train_open_rate": 0.93,
+      "test_open_rate": 0.917,
+      "AUC_open": 0.719,
+      "Brier": 0.1267,
+      "Brier_closed": 0.1267
+    },
+    {
+      "pass": "Khardung La",
+      "horizon_days": 7,
+      "n_train": 820,
+      "n_test": 177,
+      "train_open_rate": 0.93,
+      "test_open_rate": 0.915,
+      "AUC_open": 0.685,
+      "Brier": 0.1435,
+      "Brier_closed": 0.1435
+    },
+    {
+      "pass": "Khardung La",
+      "horizon_days": 14,
+      "n_train": 820,
+      "n_test": 170,
+      "train_open_rate": 0.93,
+      "test_open_rate": 0.912,
+      "AUC_open": 0.672,
+      "Brier": 0.1278,
+      "Brier_closed": 0.1278
+    },
+    {
+      "pass": "Chang La",
+      "horizon_days": 1,
+      "n_train": 820,
+      "n_test": 183,
+      "train_open_rate": 0.895,
+      "test_open_rate": 0.934,
+      "AUC_open": 0.69,
+      "Brier": 0.1119,
+      "Brier_closed": 0.1119
+    },
+    {
+      "pass": "Chang La",
+      "horizon_days": 3,
+      "n_train": 820,
+      "n_test": 181,
+      "train_open_rate": 0.895,
+      "test_open_rate": 0.934,
+      "AUC_open": 0.743,
+      "Brier": 0.1065,
+      "Brier_closed": 0.1065
+    },
+    {
+      "pass": "Chang La",
+      "horizon_days": 7,
+      "n_train": 820,
+      "n_test": 177,
+      "train_open_rate": 0.895,
+      "test_open_rate": 0.932,
+      "AUC_open": 0.723,
+      "Brier": 0.1157,
+      "Brier_closed": 0.1157
+    },
+    {
+      "pass": "Chang La",
+      "horizon_days": 14,
+      "n_train": 820,
+      "n_test": 170,
+      "train_open_rate": 0.89,
+      "test_open_rate": 0.929,
+      "AUC_open": 0.756,
+      "Brier": 0.0842,
+      "Brier_closed": 0.0842
+    },
+    {
+      "pass": "Tsaka La",
+      "horizon_days": 1,
+      "n_train": 820,
+      "n_test": 183,
+      "train_open_rate": 0.93,
+      "test_open_rate": 0.967,
+      "AUC_open": 0.388,
+      "Brier": 0.0883,
+      "Brier_closed": 0.0883
+    },
+    {
+      "pass": "Tsaka La",
+      "horizon_days": 3,
+      "n_train": 820,
+      "n_test": 181,
+      "train_open_rate": 0.93,
+      "test_open_rate": 0.967,
+      "AUC_open": 0.486,
+      "Brier": 0.0988,
+      "Brier_closed": 0.0988
+    },
+    {
+      "pass": "Tsaka La",
+      "horizon_days": 7,
+      "n_train": 820,
+      "n_test": 177,
+      "train_open_rate": 0.93,
+      "test_open_rate": 0.972,
+      "AUC_open": 0.481,
+      "Brier": 0.1022,
+      "Brier_closed": 0.1022
+    },
+    {
+      "pass": "Tsaka La",
+      "horizon_days": 14,
+      "n_train": 820,
+      "n_test": 170,
+      "train_open_rate": 0.927,
+      "test_open_rate": 0.976,
+      "AUC_open": 0.834,
+      "Brier": 0.105,
+      "Brier_closed": 0.105
+    },
+    {
+      "pass": "Marsimik La",
+      "horizon_days": 1,
+      "n_train": 820,
+      "n_test": 183,
+      "train_open_rate": 0.813,
+      "test_open_rate": 0.929,
+      "AUC_open": 0.755,
+      "Brier": 0.1291,
+      "Brier_closed": 0.1291
+    },
+    {
+      "pass": "Marsimik La",
+      "horizon_days": 3,
+      "n_train": 820,
+      "n_test": 181,
+      "train_open_rate": 0.811,
+      "test_open_rate": 0.928,
+      "AUC_open": 0.81,
+      "Brier": 0.1083,
+      "Brier_closed": 0.1083
+    },
+    {
+      "pass": "Marsimik La",
+      "horizon_days": 7,
+      "n_train": 820,
+      "n_test": 177,
+      "train_open_rate": 0.809,
+      "test_open_rate": 0.927,
+      "AUC_open": 0.663,
+      "Brier": 0.1159,
+      "Brier_closed": 0.1159
+    },
+    {
+      "pass": "Marsimik La",
+      "horizon_days": 14,
+      "n_train": 820,
+      "n_test": 170,
+      "train_open_rate": 0.809,
+      "test_open_rate": 0.924,
+      "AUC_open": 0.758,
+      "Brier": 0.1136,
+      "Brier_closed": 0.1136
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "model_version": "stage3-v1.0",
+  "snapshot_date": "2024-12-15",
+  "generated_at": "2026-05-16T04:39:19.276227",
+  "data_snapshot_seed": 42,
+  "outputs": {
+    "demand_forecasts": "demand_forecasts.parquet",
+    "route_predictions": "route_predictions.parquet",
+    "vehicle_reliability": "vehicle_reliability.parquet",
+    "stockout_risk": "stockout_risk.parquet"
+  },
+  "row_counts": {
+    "demand_forecasts": 3150,
+    "route_predictions": 580,
+    "vehicle_reliability": 249,
+    "stockout_risk": 4200
+  }
+}
