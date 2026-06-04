@@ -1,0 +1,4 @@
+ortools>=9.10
+pandas>=2.0
+pyarrow>=14.0
+psycopg2-binary>=2.9
