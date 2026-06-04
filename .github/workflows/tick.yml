@@ -1,0 +1,52 @@
+name: Bastion daily tick (Stage 4 planning)
+
+# Runs the planning loop over the committed canonical snapshot and loads the
+# resulting plans + alerts into Supabase. Manual trigger + a daily schedule.
+# This is ADDITIVE — it does not replace .github/workflows/load.yml (which loads
+# the world + Stage 3 predictions). Run load.yml once first so the snapshot,
+# model_versions and stockout_risk rows exist for Stage 4 to attach to.
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Snapshot date (YYYY-MM-DD)"
+        default: "2024-12-15"
+        required: false
+      load:
+        description: "Load into Supabase (true/false)"
+        default: "true"
+        required: false
+  schedule:
+    - cron: "30 1 * * *"   # 01:30 UTC daily (after any nightly world refresh)
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r stage4_planning/requirements.txt
+
+      - name: Run daily tick (plan + load)
+        working-directory: stage4_planning
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          DATE="${{ github.event.inputs.date || '2024-12-15' }}"
+          LOAD_FLAG=""
+          if [ "${{ github.event.inputs.load || 'true' }}" = "true" ]; then LOAD_FLAG="--load"; fi
+          python daily_tick.py --date "$DATE" $LOAD_FLAG
+
+      - name: Upload planning artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage4-plans-${{ github.run_id }}
+          path: stage3_models/output/snapshot_*/stage4/
+          if-no-files-found: warn
