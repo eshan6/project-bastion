@@ -1,0 +1,22 @@
+# Project Bastion — Netlify configuration
+#
+# This dashboard compiles JSX in the browser via @babel/standalone
+# (see the <script type="text/babel"> tags in index.html). There is NO
+# build step — the files are served exactly as they are in the repo.
+#
+# This config tells Netlify precisely that, so its auto-detection never
+# tries to run an npm build that doesn't exist and fails the deploy.
+
+[build]
+  # No build command. The site is static + in-browser JSX compilation.
+  command = ""
+  # Publish the repo root, where index.html and its sibling .jsx/.js/.css live.
+  publish = "."
+
+# Serve .jsx files with a JavaScript content type so the browser fetches
+# them cleanly (some hosts default .jsx to an odd MIME type, which can make
+# the babel loader choke). Belt-and-suspenders; harmless if not needed.
+[[headers]]
+  for = "/*.jsx"
+  [headers.values]
+    Content-Type = "application/javascript; charset=utf-8"
