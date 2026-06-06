@@ -107,6 +107,13 @@ function MapScreen({ openLineage, day }) {
 }
 
 function PostDetailCard({ post, risks, status, isolated, openLineage }) {
+  // Isolation is a POST-LEVEL property (P(all served_by passes closed)),
+  // computed once per post by the Stage 3 risk_scorer and broadcast onto every
+  // risk row at the post. We read it off any risk row here. If no risk fired at
+  // this post, there's no row carrying it — show "n/a" rather than implying 0%.
+  const isoProb = risks.length > 0 ? risks[0].isolation_probability : null;
+  const isoTone = isoProb == null ? "" : isoProb >= 0.6 ? "crit" : isoProb >= 0.3 ? "warn" : "ok";
+
   return (
     <div className="card">
       <div className="card-head">
@@ -139,6 +146,14 @@ function PostDetailCard({ post, risks, status, isolated, openLineage }) {
         <div className="row" style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
           <span className="muted">Air resupply</span>
           {post.has_air ? <Tag tone="ok">supported</Tag> : <Tag>no</Tag>}
+        </div>
+        <div className="row" style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+          <span className="muted">Isolation P(closed)</span>
+          {isoProb == null
+            ? <span className="mono muted">n/a</span>
+            : <span className="mono" style={{ color: isoTone === "crit" ? "var(--crit)" : isoTone === "warn" ? "var(--warn)" : "var(--ok)" }}>
+                {(isoProb * 100).toFixed(0)}%
+              </span>}
         </div>
 
         {risks.length > 0 && (
