@@ -45,8 +45,13 @@ def run_plan(snapshot_dir: str | Path,
     # 1. Bundle ----------------------------------------------------------------
     b = inputs.load_bundle(snapshot_dir, planning_horizon=H)
     d = b.diagnostics
-    print(f"  at-risk posts: {d['n_at_risk_posts']}   deficit: {d['total_deficit_tonnes']} t   "
-          f"eligible vehicles: {d['eligible_vehicles']}")
+    print(f"  in-scope posts: {d['n_in_scope_posts']} "
+          f"(isolation-gated {d['n_gated_by_isolation']}, alert-only {d['n_in_scope_by_alert_only']})   "
+          f"deficit: {d['total_deficit_tonnes']} t   eligible vehicles: {d['eligible_vehicles']}")
+    print(f"  deficit by head (t): {d['deficit_tonnes_by_head']}")
+    if d["n_substitutions"]:
+        print(f"  perishable substitutions: {d['n_substitutions']} "
+              f"({d['substituted_tonnes']} t routed to longer-life substitute)")
     if d["n_isolated_legs"]:
         print(f"  ⚠ road-isolated at-risk posts (path P(open) < "
               f"{cfg.PATH_FEASIBILITY_MIN}): {d['n_isolated_legs']}")
@@ -65,9 +70,8 @@ def run_plan(snapshot_dir: str | Path,
     }
 
     # 3. Assemble plan + leg rows ----------------------------------------------
-    plan_rows, leg_rows = [], []
+    plan_rows, leg_rows, route_rows = [], [], []
     plan_compare = []
-    # Deterministic plan_id: stable across reruns for the same snapshot+objective+model.
     plan_ns = uuid.uuid5(uuid.NAMESPACE_URL, "bastion/stage4/resupply_plan")
     for obj in cfg.OBJECTIVES:
         res = results[obj]
@@ -79,17 +83,35 @@ def run_plan(snapshot_dir: str | Path,
             "expected_disrupted_legs": res["expected_disrupted_legs"],
             "mean_leg_risk": res["mean_leg_risk"],
             "vehicles_used": res["vehicles_used"], "posts_served": res["posts_served"],
+            "convoys": res.get("convoys", 0),
             "covered_tonnes": res["covered_tonnes"], "shortfall_tonnes": res["shortfall_tonnes"],
-            "coverage_pct": res["coverage_pct"], "solve_time_s": res["solve_time_s"],
+            "coverage_pct": res["coverage_pct"],
+            "coverage_reachable_pct": res.get("coverage_reachable_pct", res["coverage_pct"]),
+            "isolated_tonnes": res.get("isolated_tonnes", 0.0),
+            "solve_time_s": res["solve_time_s"],
             **lineage,
         })
         for seq, leg in enumerate(res["legs"]):
             leg_rows.append({"plan_id": plan_id, "seq": seq, **leg,
                              "depart_date": snap_date, **lineage})
+        # convoy manifest (one row per dispatched vehicle route)
+        for r in res.get("routes", []):
+            route_rows.append({"plan_id": plan_id, "objective": obj,
+                               "vehicle_id": r["vehicle_id"], "vehicle_class": r["vehicle_class"],
+                               "depot_id": r["depot_id"], "axis": r["axis"],
+                               "stops": ">".join(r["stops"]), "n_stops": len(r["stops"]),
+                               "route_km": r["route_km"],
+                               "expected_cost": r.get("expected_cost", 0.0),
+                               "eta_hours": r.get("eta_hours", 0.0),
+                               "expected_risk": r.get("expected_risk", 0.0),
+                               "depart_date": snap_date, **lineage})
         plan_compare.append({
             "objective": obj, "status": res["status"],
             "vehicles_used": res["vehicles_used"], "posts_served": res["posts_served"],
-            "coverage_pct": res["coverage_pct"], "shortfall_tonnes": res["shortfall_tonnes"],
+            "convoys": res.get("convoys", 0),
+            "coverage_pct": res["coverage_pct"],
+            "coverage_reachable_pct": res.get("coverage_reachable_pct", res["coverage_pct"]),
+            "shortfall_tonnes": res["shortfall_tonnes"], "isolated_tonnes": res.get("isolated_tonnes", 0.0),
             "total_cost": res["total_cost"], "total_time_hours_makespan": res["total_time_hours"],
             "aggregate_risk": res["aggregate_risk"],
             "expected_disrupted_legs": res["expected_disrupted_legs"],
@@ -98,12 +120,41 @@ def run_plan(snapshot_dir: str | Path,
 
     plans_df = pd.DataFrame(plan_rows)
     legs_df = pd.DataFrame(leg_rows) if leg_rows else pd.DataFrame(columns=[
-        "plan_id", "seq", "vehicle_id", "vehicle_class", "depot_id", "route_id",
-        "post_id", "sku_id", "qty", "weight_kg", "expected_cost", "expected_risk",
-        "eta_hours", "path_availability", "depart_date", *lineage.keys()])
+        "plan_id", "seq", "vehicle_id", "vehicle_class", "depot_id", "axis", "route_id",
+        "post_id", "sku_id", "qty", "weight_kg", "stop_order", "route_km",
+        "expected_cost", "expected_risk", "eta_hours", "path_availability",
+        "depart_date", *lineage.keys()])
+    if len(legs_df):
+        legs_df = legs_df.sort_values(
+            ["plan_id", "depot_id", "axis", "vehicle_id", "stop_order", "post_id", "sku_id"]
+        ).reset_index(drop=True)
+        legs_df["seq"] = legs_df.groupby("plan_id").cumcount()
+    routes_df = pd.DataFrame(route_rows) if route_rows else pd.DataFrame(columns=[
+        "plan_id", "objective", "vehicle_id", "vehicle_class", "depot_id", "axis",
+        "stops", "n_stops", "route_km", "expected_cost", "eta_hours", "expected_risk",
+        "depart_date", *lineage.keys()])
+    if len(routes_df):
+        routes_df = routes_df.sort_values(
+            ["plan_id", "depot_id", "axis", "vehicle_id"]).reset_index(drop=True)
 
     # 4. Alerts ----------------------------------------------------------------
     alerts_df = alerts_mod.generate_alerts(snapshot_dir, planning_horizon=H)
+
+    # 4b. Shortfalls (per plan) + substitutions (bundle-level) -----------------
+    shortfall_rows = []
+    for obj in cfg.OBJECTIVES:
+        pid_obj = str(uuid.uuid5(plan_ns, f"{snap_date}:{H}:{cfg.MODEL_VERSION}:{obj}"))
+        for sf in results[obj].get("shortfalls", []):
+            shortfall_rows.append({"plan_id": pid_obj, "objective": obj, **sf, **lineage})
+    shortfalls_df = pd.DataFrame(shortfall_rows) if shortfall_rows else pd.DataFrame(
+        columns=["plan_id", "objective", "post_id", "sku_id", "shortfall_units",
+                 "shortfall_kg", "head", "tier", "cause", "air_resupply_possible",
+                 "path_availability", *lineage.keys()])
+    if len(shortfalls_df):
+        shortfalls_df = shortfalls_df.sort_values(
+            ["plan_id", "post_id", "sku_id"]).reset_index(drop=True)
+    subs_df = pd.DataFrame(b.substitutions) if b.substitutions else pd.DataFrame(
+        columns=["post_id", "from_sku", "to_sku", "units_from", "units_to", "note"])
 
     # ── Persist ───────────────────────────────────────────────────────────────
     p_plans = out_dir / "resupply_plans.parquet"
@@ -112,14 +163,27 @@ def run_plan(snapshot_dir: str | Path,
     plans_df.to_parquet(p_plans, index=False)
     legs_df.to_parquet(p_legs, index=False)
     alerts_df.to_parquet(p_alerts, index=False)
+    p_routes = out_dir / "resupply_convoys.parquet"
+    routes_df.to_parquet(p_routes, index=False)
+    p_short = out_dir / "resupply_shortfalls.parquet"
+    p_subs = out_dir / "perishable_substitutions.parquet"
+    shortfalls_df.to_parquet(p_short, index=False)
+    subs_df.to_parquet(p_subs, index=False)
 
     # ── Decision-focused diagnostics (the "would change a decision" readout) ──
     diagnostics = {
         **lineage,
         "scope": {
-            "at_risk_posts": d["n_at_risk_posts"],
+            "in_scope_posts": d["n_in_scope_posts"],
+            "isolation_gated": d["n_gated_by_isolation"],
+            "alert_only": d["n_in_scope_by_alert_only"],
             "deficit_pairs": d["n_deficit_pairs"],
             "total_deficit_tonnes": d["total_deficit_tonnes"],
+            "deficit_tonnes_by_head": d["deficit_tonnes_by_head"],
+            "stocking_window_by_post": d["stocking_window_by_post"],
+            "days_to_closure_by_post": d["days_to_closure_by_post"],
+            "n_substitutions": d["n_substitutions"],
+            "substituted_tonnes": d["substituted_tonnes"],
             "eligible_vehicles": d["eligible_vehicles"],
             "depots_in_play": d["depots_in_play"],
         },
@@ -141,25 +205,29 @@ def run_plan(snapshot_dir: str | Path,
     (out_dir / "lineage.json").write_text(json.dumps({
         **lineage,
         "outputs": {"resupply_plans": p_plans.name, "resupply_plan_legs": p_legs.name,
-                    "alerts": p_alerts.name},
+                    "resupply_convoys": p_routes.name,
+                    "alerts": p_alerts.name, "resupply_shortfalls": p_short.name,
+                    "perishable_substitutions": p_subs.name},
         "row_counts": {"resupply_plans": len(plans_df), "resupply_plan_legs": len(legs_df),
-                       "alerts": len(alerts_df)},
+                       "resupply_convoys": len(routes_df),
+                       "alerts": len(alerts_df), "resupply_shortfalls": len(shortfalls_df),
+                       "perishable_substitutions": len(subs_df)},
     }, indent=2))
 
     # ── Console summary ───────────────────────────────────────────────────────
     print(f"\n  plans:")
     for pc in plan_compare:
-        print(f"    {pc['objective']:9s}  cover {pc['coverage_pct']:5.1f}%  "
-              f"veh {pc['vehicles_used']:3d}  ₹{pc['total_cost']:>12,.0f}  "
+        print(f"    {pc['objective']:9s}  reach-cover {pc['coverage_reachable_pct']:5.1f}%  "
+              f"convoys {pc['convoys']:3d}  veh {pc['vehicles_used']:3d}  ₹{pc['total_cost']:>12,.0f}  "
               f"makespan {pc['total_time_hours_makespan']:6.1f}h  "
-              f"E[disrupted] {pc['expected_disrupted_legs']:5.2f}  "
-              f"({pc['solve_time_s']:.2f}s)")
+              f"({pc['status']}, {pc['solve_time_s']:.2f}s)")
     print(f"  alerts: {len(alerts_df)}  "
           f"({diagnostics['alerts_summary']['by_severity']})")
     print(f"\n✓ Stage 4 plan complete in {time.time()-t0:.1f}s  → {out_dir}")
 
     return {"out_dir": out_dir, **lineage,
-            "n_plans": len(plans_df), "n_legs": len(legs_df), "n_alerts": len(alerts_df)}
+            "n_plans": len(plans_df), "n_legs": len(legs_df),
+            "n_convoys": len(routes_df), "n_alerts": len(alerts_df)}
 
 
 def _interpretation(b: inputs.Bundle, plan_compare: list) -> list:

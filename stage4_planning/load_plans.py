@@ -38,7 +38,7 @@ STAGE4_DIR = SNAP_DIR / "stage4"
 
 SNAPSHOT_LABEL = "canonical_seed42"
 SNAPSHOT_DATE = "2024-12-15"
-MODEL_VERSION_NAME = "stage4-v1.0"
+MODEL_VERSION_NAME = "stage4-v1.1"
 
 
 def pq(name):

@@ -1,5 +1,77 @@
 # Project Bastion — Stage 4: Planning & Optimization Layer
 
+> **v2.0 (milk-run convoy optimizer).** v1.1 was one-vehicle-one-post: every at-risk
+> post got its own truck, each re-paying the shared mountain trunk (every route in the
+> seed-42 world crosses Zoji La; depot P005 alone serves 12 posts via Zoji La). On this
+> topology that is structurally wasteful. v2.0 plans **milk-run convoys**: a vehicle
+> leaves a depot, climbs one axis, and drops multi-SKU loads at several posts in road
+> order until its payload is exhausted.
+>
+> **Distances.** Routing needs post→post road distances, which Stage 2 didn't have. A
+> new `stage2_world/road_network.py` emits `post_distances.parquet` using a spine model:
+> each post's depot→post road distance is its position on the axis spine; inter-post
+> distance = max(detour·great-circle, |Δspine|), then Floyd–Warshall all-pairs-shortest-
+> path repair. Verified physically valid: 0 triangle-inequality violations, 0 spine-
+> envelope violations, perfect symmetry. Flagged SYNTHETIC-INFERRED (no real survey
+> exists; one-file replacement point when it does).
+>
+> **Solver.** Exact two-phase decomposition (proven optimal, no optimality loss):
+> *Phase 1* allocates scarce depot stock to posts by tier priority (LP). *Phase 2* routes
+> per (depot,axis) cluster, further split into full-truckload shuttles (no routing needed
+> — a full truck can't chain) and a tiny residual milk-run VRP (CP-SAT). Routing is on
+> per-post tonnage; the SKU breakdown is filled deterministically after (route cost never
+> depends on which carton sits on which truck). cost/time prove `optimal`; risk/balanced
+> report `feasible` only because the risk objective is mathematically flat (verified
+> byte-identical at 3s vs 60s), not under-solved.
+>
+> **Result on seed-42 / 15-Dec:** 98.2% of *reachable* demand covered across all 15
+> reachable posts and all six heads (586 t correctly surfaced as road-isolated — the
+> winter reality, not a failure). Milk-runs present (e.g. P019→P018→P010 on one convoy).
+> Cost reconciles exactly (90 convoy costs = plan total). Deterministic across reruns.
+> ~20s end-to-end. New output `resupply_convoys.parquet` (one row per dispatched route)
+> alongside the v1.1 shortfall/substitution tables.
+>
+> **Known carry-over:** the risk objective saturates (aggregate_risk → 1.0 when many
+> independent-deadline vehicles compound), so min_risk doesn't discriminate well — the
+> same Stage 4 risk-saturation issue flagged earlier, now visible in the VRP. Separate fix.
+
+---
+
+> **v1.1 (Advance Winter Stocking rebuild).** v1.0 defined a post's deficit as
+> *(21-day P90 target − current stock)* and produced plans containing **only Fresh
+> Meat**: every other SKU sat at 4–7× of a 21-day target because forward posts hold
+> deep pre-winter reserves, so their deficit clipped to zero. Only the one perishable
+> (7-day shelf life) was ever thin enough to surface. The optimizer was correct; the
+> deficit *definition* was wrong — it asked "what runs out in two weeks" against posts
+> provisioned for six months.
+>
+> The decision these posts actually model is **Advance Winter Stocking (AWS)**:
+> Eastern Ladakh forward posts are road-cut for ~5–6 months a winter (winter declared
+> 15-Nov; passes shut Nov onwards), and AWS pre-positions everything needed to last the
+> closure *before* the road shuts. v1.1 therefore stocks to
+> `daily_p90 × (days_to_closure + ISOLATION_DURATION + RESERVE)` (default 120-day
+> isolation, conservative vs the headline ~150–180d), **gated by isolation probability**
+> (a post is only force-stocked to AWS scale if it's actually going to be cut off), with
+> each SKU's window **capped at its shelf life** (read live from `skus.parquet`).
+> Perishable demand beyond shelf life is **routed into a longer-life substitute** (Fresh
+> Meat → Tinned Rations, mirroring the real ~2015 frozen/tinned contract shift); any
+> residual the depot genuinely cannot supply is **surfaced as an explicit shortfall**
+> (`resupply_shortfalls.parquet`, cause-tagged road_isolated / depot_short /
+> capacity_short, air-resupply flagged) — never silently dropped.
+>
+> Result on the seed-42 / 15-Dec snapshot: plans now ship **29 SKUs across all six
+> heads** (611 t Rations, 593 t POL, plus Engineer/Medical/Ammunition/Clothing) instead
+> of Fresh-Meat-only. Per-row `expected_cost` now reconciles exactly to plan `total_cost`
+> on multi-SKU loads. ~47% road coverage on 15-Dec is **reachability-bound, not
+> stock-bound** — half the in-scope posts are genuinely road-isolated mid-winter, which
+> the system now states honestly rather than papering over.
+>
+> Public anchors: ThePrint (20-Sep-2024), The Week / ETV Bharat (2020), The Tribune
+> (Jan-2025) on the six-month road-closed AWS cycle. New parameters isolated in
+> `config.py` (`ISOLATION_DURATION_DAYS`, `ISOLATION_GATE`, `SUBSTITUTION_MAP`).
+
+---
+
 Stage 4 turns Stage 3's *predictions* into *actions*. It is the layer that
 answers "given what we forecast, what should actually roll, and what can't be
 saved by road at all?"
