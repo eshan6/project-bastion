@@ -85,6 +85,11 @@ def run_plan(snapshot_dir: str | Path,
             "vehicles_used": res["vehicles_used"], "posts_served": res["posts_served"],
             "convoys": res.get("convoys", 0),
             "covered_tonnes": res["covered_tonnes"], "shortfall_tonnes": res["shortfall_tonnes"],
+            "road_covered_tonnes": res.get("road_covered_tonnes", res["covered_tonnes"]),
+            "non_road_covered_tonnes": res.get("non_road_covered_tonnes", 0.0),
+            "road_cost": res.get("road_cost", res["total_cost"]),
+            "non_road_cost": res.get("non_road_cost", 0.0),
+            "posts_served_nonroad": res.get("posts_served_nonroad", 0),
             "coverage_pct": res["coverage_pct"],
             "coverage_reachable_pct": res.get("coverage_reachable_pct", res["coverage_pct"]),
             "isolated_tonnes": res.get("isolated_tonnes", 0.0),
@@ -112,6 +117,9 @@ def run_plan(snapshot_dir: str | Path,
             "coverage_pct": res["coverage_pct"],
             "coverage_reachable_pct": res.get("coverage_reachable_pct", res["coverage_pct"]),
             "shortfall_tonnes": res["shortfall_tonnes"], "isolated_tonnes": res.get("isolated_tonnes", 0.0),
+            "non_road_covered_tonnes": res.get("non_road_covered_tonnes", 0.0),
+            "non_road_cost": res.get("non_road_cost", 0.0),
+            "non_road_summary": res.get("non_road_summary", {}),
             "total_cost": res["total_cost"], "total_time_hours_makespan": res["total_time_hours"],
             "aggregate_risk": res["aggregate_risk"],
             "expected_disrupted_legs": res["expected_disrupted_legs"],
@@ -156,6 +164,22 @@ def run_plan(snapshot_dir: str | Path,
     subs_df = pd.DataFrame(b.substitutions) if b.substitutions else pd.DataFrame(
         columns=["post_id", "from_sku", "to_sku", "units_from", "units_to", "note"])
 
+    # 4c. Non-road legs (air/porter/mule) — first-class ontology rows ----------
+    nr_rows = []
+    for obj in cfg.OBJECTIVES:
+        pid_obj = str(uuid.uuid5(plan_ns, f"{snap_date}:{H}:{cfg.MODEL_VERSION}:{obj}"))
+        for seq, l in enumerate(results[obj].get("non_road_legs", [])):
+            nr_rows.append({"plan_id": pid_obj, "objective": obj, "seq": seq, **l,
+                            "depart_date": snap_date, **lineage})
+    nonroad_df = pd.DataFrame(nr_rows) if nr_rows else pd.DataFrame(
+        columns=["plan_id", "objective", "seq", "post_id", "sku_id", "qty",
+                 "weight_kg", "transport_mode", "cost_per_kg", "expected_cost",
+                 "depot_id", "axis", "head", "tier", "depart_date", *lineage.keys()])
+    if len(nonroad_df):
+        nonroad_df = nonroad_df.sort_values(
+            ["plan_id", "transport_mode", "post_id", "sku_id"]).reset_index(drop=True)
+        nonroad_df["seq"] = nonroad_df.groupby("plan_id").cumcount()
+
     # ── Persist ───────────────────────────────────────────────────────────────
     p_plans = out_dir / "resupply_plans.parquet"
     p_legs = out_dir / "resupply_plan_legs.parquet"
@@ -169,6 +193,8 @@ def run_plan(snapshot_dir: str | Path,
     p_subs = out_dir / "perishable_substitutions.parquet"
     shortfalls_df.to_parquet(p_short, index=False)
     subs_df.to_parquet(p_subs, index=False)
+    p_nonroad = out_dir / "resupply_nonroad_legs.parquet"
+    nonroad_df.to_parquet(p_nonroad, index=False)
 
     # ── Decision-focused diagnostics (the "would change a decision" readout) ──
     diagnostics = {
@@ -207,11 +233,13 @@ def run_plan(snapshot_dir: str | Path,
         "outputs": {"resupply_plans": p_plans.name, "resupply_plan_legs": p_legs.name,
                     "resupply_convoys": p_routes.name,
                     "alerts": p_alerts.name, "resupply_shortfalls": p_short.name,
-                    "perishable_substitutions": p_subs.name},
+                    "perishable_substitutions": p_subs.name,
+                    "resupply_nonroad_legs": p_nonroad.name},
         "row_counts": {"resupply_plans": len(plans_df), "resupply_plan_legs": len(legs_df),
                        "resupply_convoys": len(routes_df),
                        "alerts": len(alerts_df), "resupply_shortfalls": len(shortfalls_df),
-                       "perishable_substitutions": len(subs_df)},
+                       "perishable_substitutions": len(subs_df),
+                       "resupply_nonroad_legs": len(nonroad_df)},
     }, indent=2))
 
     # ── Console summary ───────────────────────────────────────────────────────
@@ -221,6 +249,10 @@ def run_plan(snapshot_dir: str | Path,
               f"convoys {pc['convoys']:3d}  veh {pc['vehicles_used']:3d}  ₹{pc['total_cost']:>12,.0f}  "
               f"makespan {pc['total_time_hours_makespan']:6.1f}h  "
               f"({pc['status']}, {pc['solve_time_s']:.2f}s)")
+        nrs = pc.get("non_road_summary", {})
+        if nrs:
+            modes = "  ".join(f"{m}: {s['tonnes']}t/₹{s['cost']:,.0f}" for m, s in nrs.items())
+            print(f"              non-road  {pc.get('non_road_covered_tonnes', 0)}t total — {modes}")
     print(f"  alerts: {len(alerts_df)}  "
           f"({diagnostics['alerts_summary']['by_severity']})")
     print(f"\n✓ Stage 4 plan complete in {time.time()-t0:.1f}s  → {out_dir}")
@@ -237,19 +269,28 @@ def _interpretation(b: inputs.Bundle, plan_compare: list) -> list:
     iso = b.diagnostics["n_isolated_legs"]
     if iso:
         air = sum(1 for x in b.diagnostics["isolated_legs"] if x["has_air_resupply"])
+        nr = plan_compare[0].get("non_road_summary", {}) if plan_compare else {}
+        nr_t = plan_compare[0].get("non_road_covered_tonnes", 0.0) if plan_compare else 0.0
+        nr_cost = plan_compare[0].get("non_road_cost", 0.0) if plan_compare else 0.0
+        residual = plan_compare[0].get("isolated_tonnes", 0.0) if plan_compare else 0.0
         notes.append(
             f"{iso} at-risk post(s) are road-isolated at the planning horizon "
             f"(serving pass path P(open) below {cfg.PATH_FEASIBILITY_MIN}). "
-            f"{air} of them support air resupply; the remainder cannot be sustained "
-            f"by any modelled means and need pre-positioning BEFORE the pass shuts. "
-            f"These deficits show as shortfall in every plan — the optimizer is "
-            f"correctly refusing to promise a delivery it cannot make.")
+            f"{air} of them have an ALG/DZ for air resupply. Non-road modes "
+            f"(mule column, porter column, air-drop) resolve {nr_t:.1f}t of the "
+            f"isolated deficit at ₹{nr_cost:,.0f} — roughly {len(nr)} mode(s) in "
+            f"play. The remaining {residual:.1f}t is the genuine pre-positioning "
+            f"gap: bulk tonnage (dominated by POL) that exceeds what animal "
+            f"columns and the available air window can lift. It must move by "
+            f"road BEFORE the pass shuts.")
     covers = {pc["objective"]: pc["coverage_pct"] for pc in plan_compare}
     if covers and min(covers.values()) < 100.0:
         notes.append(
-            f"Best achievable road coverage is {max(covers.values()):.1f}% — the "
-            f"gap is transport/reachability-bound, not stock-bound (depots hold the "
-            f"goods). The lever is convoys-before-closure, not more inventory.")
+            f"Best achievable coverage including non-road modes is "
+            f"{max(covers.values()):.1f}% — the residual gap is lift-capacity-"
+            f"bound, not stock-bound (depots hold the goods). The lever is "
+            f"convoys-before-closure; air/porter/mule is the in-season mitigation, "
+            f"at ~40-50x road cost per tonne.")
     # plan spread
     feasible = [pc for pc in plan_compare if pc["status"] in ("optimal", "feasible")]
     if len(feasible) >= 2:

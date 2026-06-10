@@ -330,6 +330,162 @@ def _route_residual(b: Bundle, depot: str, axis: str, posts: list, post_g: dict,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# PHASE 3 — Non-road transport (air / porter / mule)
+# ─────────────────────────────────────────────────────────────────────────────
+def _resolve_non_road(b: Bundle, road_shortfalls: list, objective: str) -> dict:
+    """After Phase 1+2 leave road-isolated shortfalls, Phase 3 resolves as many
+    as possible via non-road modes (mule → porter → air, cheapest first).
+
+    Each mode has:
+      - capacity per sortie × available sorties (weather-adjusted)
+      - eligible stock heads (mules can't carry bulk POL)
+      - eligible posts (air = has_air_resupply only; mule/porter = all non-depot)
+
+    Returns {legs: [...], resolved_kg: float, remaining_shortfalls: [...],
+             mode_summary: {mode: {tonnes, cost, sorties_used, posts_served}}}
+    """
+    if not hasattr(cfg, 'NON_ROAD_TRANSPORT_MODES'):
+        return {"legs": [], "resolved_kg": 0.0, "remaining_shortfalls": road_shortfalls,
+                "mode_summary": {}}
+
+    modes = cfg.NON_ROAD_TRANSPORT_MODES
+    mode_order = getattr(cfg, 'NON_ROAD_MODE_ORDER', sorted(modes.keys()))
+
+    # Weather capacity fraction based on snapshot month
+    snap_month = int(b.snapshot_date.split("-")[1]) if "-" in b.snapshot_date else 12
+    weather_frac = cfg.NON_ROAD_WEATHER_CAPACITY_FRACTION.get(snap_month, 0.50)
+
+    # Build the residual pool: (post, sku) -> unmet_units, from road shortfalls
+    # Only road_isolated shortfalls are candidates; depot_short/capacity_short
+    # are road-reachable problems that non-road modes don't help with.
+    residual = {}
+    for sf in road_shortfalls:
+        if sf["cause"] == "road_isolated":
+            residual[(sf["post_id"], sf["sku_id"])] = sf["shortfall_units"]
+
+    nr_legs = []
+    mode_summary = {}
+    sortie_counter = 0  # for deterministic leg IDs
+
+    for mode_name in mode_order:
+        mode = modes[mode_name]
+        eligible_heads = set(mode.get("eligible_heads", []))
+        excluded_heads = set(mode.get("excluded_heads", []))
+        cap_per_sortie = mode["capacity_kg_per_sortie"]
+        max_sorties = mode["sorties_available"]
+        cost_per_kg = mode["cost_per_kg"]
+
+        # Weather adjustment
+        effective_cap = cap_per_sortie * weather_frac
+        effective_sorties = max_sorties  # sorties count unchanged; capacity per sortie reduced
+
+        # Post eligibility
+        eligibility = mode.get("eligible_posts", "all_non_depot")
+
+        mode_kg = 0.0
+        mode_cost = 0.0
+        mode_sorties_used = 0
+        mode_posts = set()
+
+        # Per-post capacity pool: each post gets its own sortie allocation
+        # (a mule column to post A doesn't reduce the column to post B —
+        # they're separate animal transport units).
+        post_caps = {}
+        for pid in sorted(set(pk[0] for pk in residual)):
+            if eligibility == "air_resupply_only" and not b.legs[pid].has_air_resupply:
+                continue
+            post_caps[pid] = effective_cap * effective_sorties
+
+        # Allocate: within each eligible post, fill by tier priority (tier 1 first),
+        # then by weight (heaviest first within tier) — same logic as Phase 1.
+        for pid in sorted(post_caps.keys()):
+            cap_left = post_caps[pid]
+            if cap_left <= 0:
+                continue
+
+            # Gather eligible (post, sku) pairs
+            candidates = []
+            for (p, k), units in sorted(residual.items()):
+                if p != pid or units <= 1e-6:
+                    continue
+                head = b.sku_meta[k]["head"]
+                if excluded_heads and head in excluded_heads:
+                    continue
+                if eligible_heads and head not in eligible_heads:
+                    continue
+                tier = b.sku_meta[k]["tier"]
+                wkg = b.sku_weight_kg[k]
+                candidates.append((p, k, units, tier, wkg))
+
+            # Sort: tier ascending (tier 1 = most critical first), then weight desc
+            candidates.sort(key=lambda c: (c[3], -c[4]))
+
+            sortie_kg_this_post = 0.0
+            for p, k, units_avail, tier, wkg in candidates:
+                if cap_left <= 0:
+                    break
+                # How many units fit in remaining capacity? (cap_left and wkg both in kg)
+                if wkg > 0:
+                    max_units = cap_left / wkg
+                else:
+                    max_units = units_avail
+                take = min(units_avail, max_units)
+                take = float(int(take))  # round down to whole units
+                if take <= 0:
+                    continue
+
+                take_kg = take * wkg
+                nr_legs.append({
+                    "post_id": pid, "sku_id": k, "qty": take,
+                    "weight_kg": round(take_kg, 2),
+                    "transport_mode": mode_name,
+                    "cost_per_kg": cost_per_kg,
+                    "expected_cost": round(take_kg * cost_per_kg, 2),
+                    "depot_id": b.legs[pid].depot_id,
+                    "axis": b.post_axis.get(pid, "?"),
+                    "head": b.sku_meta[k]["head"],
+                    "tier": tier,
+                })
+                residual[(pid, k)] -= take
+                cap_left -= take_kg
+                mode_kg += take_kg
+                mode_cost += take_kg * cost_per_kg
+                sortie_kg_this_post += take_kg
+                mode_posts.add(pid)
+
+            if sortie_kg_this_post > 0:
+                mode_sorties_used += math.ceil(sortie_kg_this_post / effective_cap)
+
+        if mode_kg > 0:
+            mode_summary[mode_name] = {
+                "tonnes": round(mode_kg / 1000.0, 2),
+                "cost": round(mode_cost, 2),
+                "sorties_used": mode_sorties_used,
+                "posts_served": len(mode_posts),
+                "cost_per_kg": cost_per_kg,
+                "weather_capacity_fraction": round(weather_frac, 2),
+            }
+
+    # Rebuild remaining shortfalls from whatever residual is left
+    remaining = []
+    for sf in road_shortfalls:
+        if sf["cause"] != "road_isolated":
+            remaining.append(sf)
+            continue
+        left = residual.get((sf["post_id"], sf["sku_id"]), 0.0)
+        if left > 0.5:
+            remaining.append({**sf,
+                              "shortfall_units": round(left, 3),
+                              "shortfall_kg": round(left * b.sku_weight_kg[sf["sku_id"]], 2),
+                              "cause": "residual_after_nonroad"})
+
+    resolved_kg = sum(l["weight_kg"] for l in nr_legs)
+    return {"legs": nr_legs, "resolved_kg": resolved_kg,
+            "remaining_shortfalls": sorted(remaining, key=lambda r: (r["post_id"], r["sku_id"])),
+            "mode_summary": mode_summary}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # assembly + shortfalls
 # ─────────────────────────────────────────────────────────────────────────────
 def _shortfalls(b: Bundle, alloc_all: dict, delivered: dict) -> list:
@@ -392,27 +548,55 @@ def _assemble(b: Bundle, objective: str, cluster_out: dict, alloc_all: dict) -> 
 
     agg_risk = 1.0 - math.prod((1.0 - x) for x in veh_risk.values()) if veh_risk else 0.0
     edl = sum(veh_risk.values()); mlr = edl / len(veh_risk) if veh_risk else 0.0
-    shortfalls = _shortfalls(b, alloc_all, delivered)
-    covered_kg = sum(l["weight_kg"] for l in legs_out)
-    shortfall_kg = sum(s["shortfall_kg"] for s in shortfalls)
-    demand_kg = covered_kg + shortfall_kg
-    isolated_kg = sum(s["shortfall_kg"] for s in shortfalls if s["cause"] == "road_isolated")
-    reachable = demand_kg - isolated_kg
+
+    # Phase 3: resolve road-isolated shortfalls via non-road modes
+    road_shortfalls = _shortfalls(b, alloc_all, delivered)
+    nr = _resolve_non_road(b, road_shortfalls, objective)
+    nr_legs = nr["legs"]
+    nr_cost = sum(l["expected_cost"] for l in nr_legs)
+    final_shortfalls = nr["remaining_shortfalls"]
+
+    road_covered_kg = sum(l["weight_kg"] for l in legs_out)
+    nr_covered_kg = nr["resolved_kg"]
+    total_covered_kg = road_covered_kg + nr_covered_kg
+    shortfall_kg = sum(s["shortfall_kg"] for s in final_shortfalls)
+    demand_kg = total_covered_kg + shortfall_kg
+
+    # Isolated = residual after non-road (was road_isolated, modes couldn't reach it)
+    residual_isolated_kg = sum(s["shortfall_kg"] for s in final_shortfalls
+                               if s["cause"] == "residual_after_nonroad")
+    # Non-road modes also don't help depot_short/capacity_short
+    other_shortfall_kg = sum(s["shortfall_kg"] for s in final_shortfalls
+                             if s["cause"] not in ("road_isolated", "residual_after_nonroad"))
+    reachable = demand_kg - residual_isolated_kg
+
     status = "optimal" if cluster_out and all(r["status"] == "optimal" for r in cluster_out.values()) \
         else ("optimal" if not cluster_out else "feasible")
     return {"objective": objective, "status": status,
             "solve_time_s": round(sum(r["solve_time_s"] for r in cluster_out.values()), 3),
-            "legs": legs_out, "routes": routes_out, "shortfalls": shortfalls,
+            "legs": legs_out, "routes": routes_out,
+            "non_road_legs": nr_legs,
+            "non_road_summary": nr["mode_summary"],
+            "shortfalls": final_shortfalls,
             "vehicles_used": len({l["vehicle_id"] for l in legs_out}),
-            "posts_served": len({l["post_id"] for l in legs_out}),
+            "posts_served": len({l["post_id"] for l in legs_out} |
+                                {l["post_id"] for l in nr_legs}),
+            "posts_served_road": len({l["post_id"] for l in legs_out}),
+            "posts_served_nonroad": len({l["post_id"] for l in nr_legs}),
             "convoys": len(routes_out),
-            "total_cost": round(total_cost, 2), "total_time_hours": round(makespan_h, 2),
+            "total_cost": round(total_cost + nr_cost, 2),
+            "road_cost": round(total_cost, 2),
+            "non_road_cost": round(nr_cost, 2),
+            "total_time_hours": round(makespan_h, 2),
             "aggregate_risk": round(agg_risk, 4), "expected_disrupted_legs": round(edl, 3),
-            "mean_leg_risk": round(mlr, 4), "covered_tonnes": round(covered_kg / 1000.0, 2),
+            "mean_leg_risk": round(mlr, 4),
+            "covered_tonnes": round(total_covered_kg / 1000.0, 2),
+            "road_covered_tonnes": round(road_covered_kg / 1000.0, 2),
+            "non_road_covered_tonnes": round(nr_covered_kg / 1000.0, 2),
             "shortfall_tonnes": round(shortfall_kg / 1000.0, 2),
-            "coverage_pct": round(100.0 * covered_kg / demand_kg if demand_kg > 1e-9 else 100.0, 1),
-            "coverage_reachable_pct": round(100.0 * covered_kg / reachable if reachable > 1e-9 else 100.0, 1),
-            "isolated_tonnes": round(isolated_kg / 1000.0, 2)}
+            "coverage_pct": round(100.0 * total_covered_kg / demand_kg if demand_kg > 1e-9 else 100.0, 1),
+            "coverage_reachable_pct": round(100.0 * total_covered_kg / reachable if reachable > 1e-9 else 100.0, 1),
+            "isolated_tonnes": round(residual_isolated_kg / 1000.0, 2)}
 
 
 def solve_all(b: Bundle) -> dict:
@@ -424,5 +608,5 @@ def solve_all(b: Bundle) -> dict:
             alloc = allocate(b, posts, depot, obj)          # Phase 1
             alloc_all.update(alloc)
             cluster_out[(depot, axis)] = route_cluster(b, depot, axis, posts, alloc, obj)  # Phase 2
-        results[obj] = _assemble(b, obj, cluster_out, alloc_all)
+        results[obj] = _assemble(b, obj, cluster_out, alloc_all)  # incl. Phase 3
     return results

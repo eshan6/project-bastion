@@ -56,7 +56,7 @@ REPORT_DIR = ROOT / "reports"
 for _d in (OUTPUT_DIR, REPORT_DIR):
     _d.mkdir(exist_ok=True, parents=True)
 
-MODEL_VERSION = "stage4-v1.1"
+MODEL_VERSION = "stage4-v2.1"   # v2.0 = milk-run VRP; v2.1 = + air/porter/mule (Phase 3)
 DATA_SNAPSHOT_SEED = 42
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -212,3 +212,103 @@ SOLVER_TIME_LIMIT_S = 15.0
 SOLVER_TIME_LIMIT_BY_OBJECTIVE = {"min_cost": 15.0, "min_time": 15.0,
                                   "min_risk": 3.0, "balanced": 3.0}
 VRP_VEHICLE_SLACK = 3
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Non-road transport modes (Air / Porter / Mule) — #3 from audit
+# ─────────────────────────────────────────────────────────────────────────────
+# Public record is explicit: forward posts off the road network are supplied by
+# porters, ponies/mules, and air-drop, not trucks. These convert the 586t of
+# road-isolated shortfall into "solvable at higher cost" — the actual decision.
+#
+# Sources:
+#   Tribune (Jan 2025): "animal transport columns including mules and ponies"
+#     carry supplies to posts inaccessible by road; AN-32 air-drops for DBO.
+#   ThePrint (Sep 2024): Mi-17 helicopters for emergency resupply at 15000+ ft;
+#     C-130J landed at DBO ALG (2013).
+#   CAG Report 2017-18: porter/mule logistics costs 3-5x road transport per kg.
+#   Swarajyamag (Oct 2020): "dedicated animal transport units" for forward posts.
+#
+# Three modes, ordered by cost (optimizer resolves in this order):
+
+NON_ROAD_TRANSPORT_MODES = {
+    "mule_column": {
+        # Animal transport column: mules + ponies + handlers.
+        # Capacity: a column of 20 mules carries ~2t per trip (~100kg per mule,
+        # less at extreme altitude). One column per post per planning cycle is
+        # a reasonable logistics constraint. Mules cannot carry bulk fuel (POL)
+        # safely — limited to dry stores, ammo, medical, clothing, engineer.
+        # SYNTHETIC-INFERRED capacity from public "100kg per mule × 20 mule column"
+        # framing in Tribune/Swarajyamag; exact number is operational.
+        "capacity_kg_per_sortie": 2000,       # ~20 mules × 100kg
+        "sorties_available": 5,               # per planning horizon (~1 column/post/day
+                                              # over 5 operating days given weather)
+        "cost_per_kg": 120.0,                 # ₹/kg — CAG "3-5x road" => ~₹80-200/kg
+                                              # at road ₹25-40/t.km × ~50km. Mid-range.
+        "eligible_heads": ["Rations", "Ammunition", "Clothing", "Medical", "Engineer"],
+        # Mules CANNOT carry bulk POL (kerosene drums, diesel) — fire hazard,
+        # weight distribution, and leakage risk on mountain trails.
+        "excluded_heads": ["POL"],
+        "eligible_posts": "all_non_depot",    # any post reachable by trail
+        "weather_gated": True,                # blocked in severe conditions
+        "weather_block_tmin_c": -25.0,        # too cold for animal columns
+        "notes": "Animal transport column. Public record: Tribune, Swarajyamag. "
+                 "SYNTHETIC-INFERRED capacity (20 mules × 100kg per trip).",
+    },
+    "porter_column": {
+        # Human porter column: Army/civilian porters on foot trails.
+        # Lower capacity than mule but can reach posts mules cannot (very high
+        # altitude, very steep terrain). Can carry small POL quantities (jerry cans).
+        # Capacity: 20 porters × 25kg = 500kg per trip.
+        "capacity_kg_per_sortie": 500,        # 20 porters × 25kg
+        "sorties_available": 5,               # per planning horizon
+        "cost_per_kg": 250.0,                 # ₹/kg — more expensive than mule
+        "eligible_heads": ["Rations", "Ammunition", "Clothing", "Medical",
+                           "Engineer", "POL"],  # can carry jerry cans
+        "excluded_heads": [],
+        "eligible_posts": "all_non_depot",    # any post, including >5000m
+        "weather_gated": True,
+        "weather_block_tmin_c": -28.0,        # porters operate in worse conditions
+        "notes": "Human porter column. Can carry small POL (jerry cans). "
+                 "SYNTHETIC-INFERRED capacity (20 porters × 25kg).",
+    },
+    "air_drop": {
+        # AN-32 / Mi-17 air resupply: bulk drop to posts with ALGs/DZs.
+        # Capacity: AN-32 payload ~6.5t, Mi-17 underslung ~4t. We model a
+        # blended sortie capacity of 5t (some drops are heli, some fixed-wing).
+        # Only posts with has_air_resupply=True. Can carry everything including
+        # bulk POL (fuel bladders are standard air-drop cargo for forward posts).
+        # Very expensive: fuel cost + flight hours + packing + DZ crew.
+        "capacity_kg_per_sortie": 5000,       # blended AN-32/Mi-17
+        "sorties_available": 8,               # per planning horizon (weather-limited,
+                                              # aircraft availability, DZ window)
+        "cost_per_kg": 450.0,                 # ₹/kg — order of magnitude from
+                                              # IAF charter rates + logistics overhead
+        "eligible_heads": ["Rations", "POL", "Ammunition", "Clothing",
+                           "Medical", "Engineer"],
+        "excluded_heads": [],
+        "eligible_posts": "air_resupply_only",  # has_air_resupply=True
+        "weather_gated": True,
+        "weather_block_tmin_c": -22.0,        # matches Stage 2 emergency resupply
+        "notes": "AN-32/Mi-17 air-drop. Only posts with ALG/DZ (has_air_resupply). "
+                 "SYNTHETIC-INFERRED capacity and cost; anchored to public IAF "
+                 "fleet capability and Tribune/ThePrint descriptions.",
+    },
+}
+
+# Mode resolution order: cheapest first. All three resolve against the SAME
+# shortfall pool (what road optimization left behind). A cheaper mode that
+# can serve a post+SKU does so; the expensive mode mops up residuals.
+NON_ROAD_MODE_ORDER = ["mule_column", "porter_column", "air_drop"]
+
+# Weather gate for non-road: we use the snapshot-date temperature to determine
+# if non-road modes are weather-blocked. Stage 3 doesn't predict temperature
+# (it's a route/demand model), so we infer from the snapshot month.
+# Dec 15 in Eastern Ladakh: mean min temperature at 4500m is roughly -15 to -25°C.
+# Most mule/porter operations ARE feasible in mid-December; they get blocked
+# during severe WD events. We model a probability of weather-block per the
+# month, applied as a capacity reduction (not a hard on/off).
+NON_ROAD_WEATHER_CAPACITY_FRACTION = {
+    1: 0.40, 2: 0.45, 3: 0.55, 4: 0.70, 5: 0.90, 6: 1.00,
+    7: 1.00, 8: 0.95, 9: 0.85, 10: 0.75, 11: 0.55, 12: 0.45,
+}
+# SYNTHETIC-INFERRED from general high-altitude operational windows.
