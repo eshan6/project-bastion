@@ -1,6 +1,6 @@
 {
-  "model_version": "stage3-v1.0",
-  "scorer_kind": "rule_weibull_altitude_v1",
+  "model_version": "stage3-v1.1",
+  "scorer_kind": "rule_weibull_axis_v2",
   "backtest_window": [
     "2023-01-02",
     "2024-12-23"
@@ -9,36 +9,58 @@
   "horizon_days": 7,
   "n_snapshots": 104,
   "n_observations": 25896,
-  "n_actual_failures": 247,
-  "actual_failure_rate": 0.00954,
-  "predicted_failure_rate_mean": 0.01161,
-  "brier": 0.009482,
-  "brier_baseline_constant_rate": 0.009447,
-  "brier_skill_score_vs_baseline": -0.0037,
+  "n_actual_failures": 225,
+  "actual_failure_rate": 0.00869,
+  "predicted_failure_rate_mean": 0.00884,
+  "brier": 0.008604,
+  "brier_baseline_constant_rate": 0.008613,
+  "brier_skill_score_vs_baseline": 0.001,
+  "auc": 0.5935,
+  "metric_framing_note": "Dual framing: Brier skill ~0 is the covariate ceiling for rare events (base rate 0.8%); AUC is the discrimination metric the risk objective actually uses.",
+  "per_axis_discrimination": [
+    {
+      "home_axis": "DBO",
+      "n": 12584,
+      "pred_mean": 0.00973,
+      "obs_rate": 0.00969
+    },
+    {
+      "home_axis": "Demchok",
+      "n": 2392,
+      "pred_mean": 0.00894,
+      "obs_rate": 0.01045
+    },
+    {
+      "home_axis": "Pangong",
+      "n": 4888,
+      "pred_mean": 0.00956,
+      "obs_rate": 0.00777
+    },
+    {
+      "home_axis": "Rear",
+      "n": 6032,
+      "pred_mean": 0.00637,
+      "obs_rate": 0.00663
+    }
+  ],
   "calibration_buckets": [
     {
       "bucket": "(0.001, 0.005]",
-      "n": 1838,
-      "pred_mean": 0.00370657737487979,
-      "obs_rate": 0.012513601741022852
+      "n": 1475,
+      "pred_mean": 0.0049226733798111155,
+      "obs_rate": 0.0047457627118644066
     },
     {
       "bucket": "(0.005, 0.01]",
-      "n": 8132,
-      "pred_mean": 0.007824913087933774,
-      "obs_rate": 0.008484997540580424
+      "n": 16645,
+      "pred_mean": 0.0077662685589932855,
+      "obs_rate": 0.007329528386902974
     },
     {
       "bucket": "(0.01, 0.02]",
-      "n": 14561,
-      "pred_mean": 0.013755132311360718,
-      "obs_rate": 0.00995810727285214
-    },
-    {
-      "bucket": "(0.02, 0.05]",
-      "n": 1365,
-      "pred_mean": 0.0219442677959958,
-      "obs_rate": 0.007326007326007326
+      "n": 7776,
+      "pred_mean": 0.01189179669801153,
+      "obs_rate": 0.012345679012345678
     }
   ]
 }
