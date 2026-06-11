@@ -56,7 +56,7 @@ REPORT_DIR = ROOT / "reports"
 for _d in (OUTPUT_DIR, REPORT_DIR):
     _d.mkdir(exist_ok=True, parents=True)
 
-MODEL_VERSION = "stage4-v2.1"   # v2.0 = milk-run VRP; v2.1 = + air/porter/mule (Phase 3)
+MODEL_VERSION = "stage4-v2.2"   # v2.1 = air/porter/mule; v2.2 = objective-aware fleet selection (#1)
 DATA_SNAPSHOT_SEED = 42
 
 # ─────────────────────────────────────────────────────────────────────────────

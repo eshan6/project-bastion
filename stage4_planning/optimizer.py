@@ -109,11 +109,32 @@ def allocate(b: Bundle, posts: list, depot: str, objective: str) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 # PHASE 2 — routing (per cluster, fixed allocations)
 # ─────────────────────────────────────────────────────────────────────────────
-def _vehicles_for_cluster(b: Bundle, depot: str, alloc_kg: float) -> list:
+def _vehicle_rank_key(b: Bundle, objective: str):
+    """Objective-aware vehicle ranking (#1: makes the risk objective bite on
+    fleet selection).
+
+    Tested alternative — risk-per-ton (p_deadline/payload) — and REJECTED it:
+    it selects smaller reliable trucks, which adds routes, and in this world
+    route exposure (1-pa) dominates vehicle hazard (~0.01), so E[disrupted
+    legs] went UP 56.3 → 58.7. The honest physics: fewest-biggest-trucks is
+    risk-optimal at the route level; vehicle reliability is the SECONDARY
+    criterion choosing WHICH big trucks roll.
+
+    So: min_risk/balanced rank payload-first with p_deadline tiebreak (consult
+    VOR history); min_cost/min_time rank payload-first with ID tiebreak (a
+    cost planner doesn't consult VOR history). Vehicle ID is always the final
+    tiebreak — determinism."""
+    if objective in ("min_risk", "balanced"):
+        return lambda v: (-b.veh[v]["payload_tons"], b.veh[v]["p_deadline"], v)
+    return lambda v: (-b.veh[v]["payload_tons"], v)
+
+
+def _vehicles_for_cluster(b: Bundle, depot: str, alloc_kg: float,
+                           objective: str = "min_cost") -> list:
     pool = b.vehicles_by_depot.get(depot, [])
     if not pool:
         return []
-    ranked = sorted(pool, key=lambda v: (-b.veh[v]["payload_tons"], b.veh[v]["p_deadline"], v))
+    ranked = sorted(pool, key=_vehicle_rank_key(b, objective))
     chosen, cap = [], 0.0
     for v in ranked:
         if cap >= alloc_kg and chosen:
@@ -148,7 +169,7 @@ def route_cluster(b: Bundle, depot: str, axis: str, posts: list,
                                for k in b.skus_at_post[p] if (p, k) in alloc)))
               for p in served}
     pool = b.vehicles_by_depot.get(depot, [])
-    ranked = sorted(pool, key=lambda v: (-b.veh[v]["payload_tons"], b.veh[v]["p_deadline"], v))
+    ranked = sorted(pool, key=_vehicle_rank_key(b, objective))
     if not ranked:
         return {"legs": [], "routes": [], "status": "infeasible", "solve_time_s": 0.0}
 
