@@ -86,6 +86,7 @@ svg.chart{width:100%;height:auto;display:block}
 .mapbox{height:560px;border-radius:8px;overflow:hidden;background:#0b0e14;border:1px solid var(--line)}
 .mk{border-radius:50%;cursor:pointer;border:1.5px solid rgba(255,255,255,.9);box-shadow:0 0 0 2px rgba(0,0,0,.25)}
 .mk.ok{width:11px;height:11px;background:#22c55e}.mk.crit{width:13px;height:13px;background:#ef4444;box-shadow:0 0 10px 2px rgba(239,68,68,.7)}
+.mk.air{outline:2px solid #93c5fd;outline-offset:2px}
 .mk.depot{width:14px;height:14px;background:#3b82f6;border-radius:3px}
 .mk.pass{width:9px;height:9px;background:#f59e0b;border-radius:2px;transform:rotate(45deg)}
 .maplibregl-popup-content{background:#11151c;color:#e7ecf3;border-radius:8px;padding:10px 12px;font-family:var(--font);font-size:12.5px;box-shadow:0 6px 24px rgba(0,0,0,.4)}
@@ -232,7 +233,7 @@ function MapView({riskAll,go}){
     Object.entries(SCAFFOLD.passes).forEach(([nm,c])=>{const el=document.createElement("div");el.className="mk pass";el.title=nm;markers.current.push(new maplibregl.Marker({element:el}).setLngLat(c).addTo(map));});
     Object.entries(SCAFFOLD.posts).forEach(([id,p])=>{
       const r=riskRef.current[id];const cls=r&&r.atRisk?"crit":p.is_depot?"depot":"ok";
-      const el=document.createElement("div");el.className="mk "+cls;el.title=p.name;
+      const el=document.createElement("div");el.className="mk "+cls+(p.has_air&&!p.is_depot?" air":"");el.title=p.name+(p.has_air?" · ALG/DZ":"");
       const m=new maplibregl.Marker({element:el}).setLngLat([p.lon,p.lat]).addTo(map);
       el.addEventListener("click",()=>{
         const node=document.createElement("div");
@@ -269,10 +270,22 @@ function App(){
   const [asOf,setAsOf]=useState(DEFAULT_DATE),[horizon,setHorizon]=useState(14);
   const [phase,setPhase]=useState("init"),[busy,setBusy]=useState(false),[err,setErr]=useState(null);
   const [sel,setSel]=useState({post:null,sku:null,vehicle:null,plan:null});
+  const [simDate,setSimDate]=useState(null),[advancing,setAdvancing]=useState(false),[booting,setBooting]=useState(false);
   const load=useCallback(async(date,h)=>{setBusy(true);setErr(null);setPhase(p=>p==="ready"?"ready":"waking");
-    try{const [s,o]=await Promise.all([getJSON(`/snapshot?date=${date}&at_risk_only=false`),getJSON(`/optimize?date=${date}&horizon=${h}`)]);setSnap(s);setOpt(o);setPhase("ready");}
+    try{const [s,o]=await Promise.all([getJSON(`/snapshot?date=${date}&at_risk_only=false`),getJSON(`/optimize?date=${date}&horizon=${h}`)]);setSnap(s);setOpt(o);if(s.sim_date)setSimDate(s.sim_date);setPhase("ready");}
     catch(e){setErr(String(e.message||e));setPhase("error");}setBusy(false);},[]);
-  useEffect(()=>{load(asOf,horizon);},[]);// eslint-disable-line
+  useEffect(()=>{let on=true;(async()=>{ // the world fast-forwards on boot — wait for it
+    for(let i=0;i<150;i++){try{const h=await getJSON("/health",1);if(!on)return;
+      if(h.boot==="ready"){setBooting(false);setSimDate(h.sim_date);const d=h.sim_date||DEFAULT_DATE;setAsOf(d);load(d,horizon);return;}
+      if(h.boot==="error"){setErr(h.error||"world failed to initialise");setPhase("error");setBooting(false);return;}
+      setBooting(true);}catch(e){}await new Promise(r=>setTimeout(r,4000));}
+    if(on){setBooting(false);load(asOf,horizon);}})();return ()=>{on=false};},[]);// eslint-disable-line
+  const advanceDay=useCallback(async()=>{setAdvancing(true);setErr(null);
+    try{const r=await fetch(API_BASE+"/advance",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({days:1})});
+      const j=await r.json();if(!r.ok)throw new Error((j.detail&&JSON.stringify(j.detail))||("HTTP "+r.status));
+      setSimDate(j.sim_date);setAsOf(j.sim_date);await load(j.sim_date,horizon);}
+    catch(e){setErr(String(e.message||e));}
+    setAdvancing(false);},[horizon,load]);
   const diag=opt&&opt.diagnostics;
   const riskAll=(snap&&snap.stockout_risk)||[];
   const vehAll=(snap&&snap.vehicle_reliability)||[];
@@ -286,9 +299,11 @@ function App(){
      <div className="header">
        <div className="brand"><div className="brand-mark">B</div><div className="brand-name">Project Bastion</div><div className="brand-tag">Forward Stockout Predictor</div></div>
        <div className="header-right">
-         <span className="datectl">Projection as-of<input type="date" min="2022-01-01" max="2024-12-31" value={asOf} onChange={e=>{setAsOf(e.target.value);load(e.target.value,horizon);}}/></span>
+         <span className="datectl">Projection as-of<input type="date" min="2022-01-01" max={simDate||"2024-12-31"} value={asOf} onChange={e=>{setAsOf(e.target.value);load(e.target.value,horizon);}}/></span>
+         {simDate&&<span className="datectl">Sim day <b className="num" style={{color:"var(--ink)"}}>{simDate}</b></span>}
          <span className={"livedot "+(phase==="ready"?"on":phase==="error"?"err":"")}><i></i>{phase==="ready"?"Live":phase==="error"?"Offline":"Connecting"}</span>
          <button className="btn" disabled={busy} onClick={()=>load(asOf,horizon)}>{busy?"Loading…":"Refresh"}</button>
+         <button className="btn primary" disabled={busy||advancing} onClick={advanceDay} title="Advance the synthetic world one day and re-plan">{advancing?"Advancing…":"Advance one day ▸"}</button>
        </div>
      </div>
      <div className="rail">
@@ -297,7 +312,8 @@ function App(){
        <div className="rail-foot">Decision-support layer.<br/>Synthetic data; proof of functionality.<br/>{diag&&<>Model {diag.model_version} · seed {diag.data_snapshot_seed}</>}</div>
      </div>
      <div className="main"><div className="page">
-       {phase==="waking"&&<div className="banner warn"><span className="spin"></span>Computing predictions for {asOf} — the model runs on request, so a new date can take ~10–20s.</div>}
+       {booting&&<div className="banner warn"><span className="spin"></span>The synthetic world is fast-forwarding to today (one sim day per real day, deterministic replay). First boot can take ~60s.</div>}
+       {phase==="waking"&&!booting&&<div className="banner warn"><span className="spin"></span>Computing predictions for {asOf} — the model runs on request, so a new date can take ~25s.</div>}
        {phase==="error"&&<div className="banner err">Couldn’t reach the model service ({err}). It may be asleep. <a onClick={()=>load(asOf,horizon)}>Retry</a>.</div>}
        {route==="overview"&&<Overview diag={diag} passProb={passProb} go={go}/>}
        {route==="posts"&&<Posts rollup={postRollup} go={go}/>}
@@ -383,9 +399,9 @@ function PlansScreen({opt,diag,horizon,setHorizon,onReplan,busy,go}){
   const same=plans.length>1&&plans.every(p=>Math.abs((p.coverage_pct||0)-(plans[0].coverage_pct||0))<0.01);
   return (<>
     <div className="page-head"><div className="page-title">Resupply plans</div><div className="page-sub">Four strategies from the optimizer. All four deliver to every reachable post, so coverage matches — they differ in cost, transit time and leg risk. Tap a plan for its leg-by-leg detail.</div></div>
-    <div className="controls"><label>Planning horizon: <b className="num">{horizon} days</b></label><input type="range" min="3" max="45" value={horizon} onChange={e=>setHorizon(+e.target.value)}/><button className="btn primary" disabled={busy} onClick={onReplan}>{busy?"Solving…":"Run replan"}</button>{diag&&<span style={{fontSize:12,color:"var(--ink-faint)"}}>Solved in {(cmp.min_cost&&cmp.min_cost.solve_time_s)||"–"}s</span>}</div>
+    <div className="controls"><label>Stocking horizon: <b>AWS doctrine</b> — isolation-gated, shelf-life capped (set by the model, not a dial)</label><button className="btn primary" disabled={busy} onClick={onReplan}>{busy?"Solving…":"Run replan"}</button>{diag&&<span style={{fontSize:12,color:"var(--ink-faint)"}}>Solved in {(cmp.min_cost&&cmp.min_cost.solve_time_s)||"–"}s</span>}</div>
     {same&&<div className="banner" style={{background:"var(--surface-alt)",border:"1px solid var(--line)",color:"var(--ink-muted)"}}>At this horizon coverage is capped by what is reachable ({fmt(plans[0].coverage_pct,1)}%), so all four plans serve the same posts and differ only in cost, time and risk. They diverge more when more posts are reachable.</div>}
-    <div className="plans">{plans.map(p=>{const c=cmp[p.objective]||{};const best=p.objective==="balanced";return <div className={"plan"+(best?" best":"")} key={p.plan_id} style={{cursor:"pointer"}} onClick={()=>go("plan",{plan:p.plan_id})}><div className="ph"><div className="obj">{p.objective.replace("_"," ")}</div><div className="nm">{best?"Recommended":p.objective.replace("_"," ")}{best&&<Pill kind="info">balanced</Pill>}</div></div><div className="pb"><div className="pr"><span className="lbl">Coverage</span><span className="val num">{fmt(c.coverage_pct??p.coverage_pct,1)}%</span></div><div className="pr"><span className="lbl">Cost</span><span className="val num">₹{fmt(p.total_cost)}</span></div><div className="pr"><span className="lbl">Latest arrival</span><span className="val num">{fmt(p.total_time_hours,1)} h</span></div><div className="pr"><span className="lbl">Exp. disrupted legs</span><span className="val num">{fmt(p.expected_disrupted_legs,2)}</span></div><div className="pr"><span className="lbl">Mean leg risk</span><span className="val num">{fmt(p.mean_leg_risk,2)}</span></div><div className="pr"><span className="lbl">Vehicles</span><span className="val num">{c.vehicles_used??p.vehicles_used}</span></div><div className="pr"><span className="lbl">Shortfall</span><span className="val num">{fmt(p.shortfall_tonnes,1)} t</span></div><div className="pr" style={{marginTop:4,borderTop:"1px solid var(--line)",paddingTop:8}}><span className="lbl" style={{color:"var(--accent)",fontWeight:500}}>View legs →</span></div></div></div>;})}</div>
+    <div className="plans">{plans.map(p=>{const c=cmp[p.objective]||{};const best=p.objective==="balanced";return <div className={"plan"+(best?" best":"")} key={p.plan_id} style={{cursor:"pointer"}} onClick={()=>go("plan",{plan:p.plan_id})}><div className="ph"><div className="obj">{p.objective.replace("_"," ")}</div><div className="nm">{best?"Recommended":p.objective.replace("_"," ")}{best&&<Pill kind="info">balanced</Pill>}</div></div><div className="pb"><div className="pr"><span className="lbl">Coverage</span><span className="val num">{fmt(c.coverage_pct??p.coverage_pct,1)}%</span></div><div className="pr"><span className="lbl">Cost</span><span className="val num">₹{fmt(p.total_cost)}</span></div><div className="pr"><span className="lbl">Latest arrival</span><span className="val num">{fmt(p.total_time_hours,1)} h</span></div><div className="pr"><span className="lbl">Exp. disrupted legs</span><span className="val num">{fmt(p.expected_disrupted_legs,2)}</span></div><div className="pr"><span className="lbl">Mean leg risk</span><span className="val num">{fmt(p.mean_leg_risk,2)}</span></div><div className="pr"><span className="lbl">Vehicles</span><span className="val num">{c.vehicles_used??p.vehicles_used}</span></div><div className="pr"><span className="lbl">Air/mule/porter lift</span><span className="val num">{fmt(p.non_road_covered_tonnes,1)} t</span></div><div className="pr"><span className="lbl">Shortfall</span><span className="val num">{fmt(p.shortfall_tonnes,1)} t</span></div><div className="pr" style={{marginTop:4,borderTop:"1px solid var(--line)",paddingTop:8}}><span className="lbl" style={{color:"var(--accent)",fontWeight:500}}>View legs →</span></div></div></div>;})}</div>
     {diag&&<div className="card" style={{marginTop:14}}><div className="card-head"><div className="card-title">Why these numbers</div></div><div className="card-body">{diag.interpretation.map((t,i)=><div className="interp" key={i}>{t}</div>)}</div></div>}
   </>);
 }
@@ -393,16 +409,34 @@ function PlanDetail({opt,planId,go}){
   const plans=(opt&&opt.plans)||[];const legs=(opt&&opt.legs)||[];
   const plan=plans.find(p=>p.plan_id===planId)||{};
   const myLegs=legs.filter(l=>l.plan_id===planId).sort((a,b)=>a.seq-b.seq);
+  const nrLegs=((opt&&opt.non_road_legs)||[]).filter(l=>l.plan_id===planId);
+  const myShort=((opt&&opt.shortfalls)||[]).filter(s=>s.plan_id===planId).sort((a,b)=>b.shortfall_kg-a.shortfall_kg);
+  const modeName={mule_column:"Mule column",porter_column:"Porter column",air_drop:"Air-drop (AN-32/Mi-17)"};
+  const nrByMode={};nrLegs.forEach(l=>{(nrByMode[l.transport_mode]=nrByMode[l.transport_mode]||[]).push(l);});
   const desc={min_cost:"Minimises fuel and dispatch cost.",min_time:"Minimises total convoy transit hours across all legs.",min_risk:"Minimises expected leg failure: 1 − P(path open) × P(vehicle survives).",balanced:"Normalised blend of cost, time and risk."}[plan.objective]||"";
   return (<>
     <div className="page-head"><div className="crumb"><a onClick={()=>go("plans")}>Resupply plans</a> › {plan.objective}</div><div className="page-title" style={{textTransform:"capitalize"}}>{plan.objective?plan.objective.replace("_"," "):"Plan"}</div><div className="page-sub">{desc}</div></div>
     <div className="stat-grid"><Stat label="Coverage" value={fmt(plan.coverage_pct,1)} unit="%"/><Stat label="Total cost" value={"₹"+fmt(plan.total_cost)}/><Stat label="Latest arrival" value={fmt(plan.total_time_hours,1)} unit="h"/><Stat label="Vehicles tasked" value={plan.vehicles_used}/></div>
-    <div className="stat-grid"><Stat label="Posts served" value={plan.posts_served}/><Stat label="Delivered" value={fmt(plan.covered_tonnes,1)} unit="t"/><Stat label="Shortfall" value={fmt(plan.shortfall_tonnes,1)} unit="t" crit={(plan.shortfall_tonnes||0)>0}/><Stat label="Exp. disrupted legs" value={fmt(plan.expected_disrupted_legs,2)}/></div>
+    <div className="stat-grid"><Stat label="Posts served" value={plan.posts_served}/><Stat label="Delivered total" value={fmt(plan.covered_tonnes,1)} unit="t" sub={"road "+fmt(plan.road_covered_tonnes,1)+" t · non-road "+fmt(plan.non_road_covered_tonnes,1)+" t"}/><Stat label="Shortfall" value={fmt(plan.shortfall_tonnes,1)} unit="t" crit={(plan.shortfall_tonnes||0)>0}/><Stat label="Exp. disrupted legs" value={fmt(plan.expected_disrupted_legs,2)}/></div>
     <div className="card"><div className="card-head"><div className="card-title">Delivery legs <span className="count">{myLegs.length} legs · vehicle → depot → post</span></div></div><div className="card-body flush">
       <table><thead><tr><th>#</th><th>Vehicle</th><th>Class</th><th>From depot</th><th>To post</th><th>Item</th><th className="num">Load</th><th className="num">Cost</th><th className="num">ETA</th><th className="num">Leg risk</th><th className="num">Path open</th></tr></thead><tbody>
         {myLegs.map((l,i)=><tr key={i}><td className="num">{l.seq+1}</td><td>{l.vehicle_id}</td><td className="muted">{l.vehicle_class}</td><td className="muted">{postName(l.depot_id)}</td><td>{postName(l.post_id)}</td><td className="muted">{skuName(l.sku_id)}</td><td className="num">{fmt((l.weight_kg||0)/1000,2)} t</td><td className="num">₹{fmt(l.expected_cost)}</td><td className="num">{fmt(l.eta_hours,1)} h</td><td className="num">{pct(l.expected_risk)}</td><td className="num">{pct(l.path_availability)}</td></tr>)}
       </tbody></table>
     </div></div>
+    <div className="card"><div className="card-head"><div className="card-title">Air · Mule · Porter legs <span className="count">{nrLegs.length} legs · road-isolated posts, lifted by non-road modes</span></div></div>
+      {nrLegs.length===0?<div className="card-body muted" style={{fontSize:12.5}}>No non-road legs in this plan — every at-risk post is road-reachable at this date.</div>:
+      <div className="card-body flush">{Object.entries(nrByMode).map(([m,ls])=>(<React.Fragment key={m}>
+        <div style={{padding:"9px 14px",borderBottom:"1px solid var(--line)",background:"var(--surface)",fontSize:12}}><b>{modeName[m]||m}</b><span style={{color:"var(--ink-faint)",marginLeft:8}}>{fmt(ls.reduce((s,l)=>s+l.weight_kg,0)/1000,1)} t · ₹{fmt(ls.reduce((s,l)=>s+l.expected_cost,0))} · ₹{fmt(ls[0].cost_per_kg)}/kg</span></div>
+        <table><thead><tr><th>To post</th><th>Item</th><th>Head</th><th className="num">Qty</th><th className="num">Load</th><th className="num">Cost</th></tr></thead><tbody>
+        {ls.map((l,i)=><tr key={i}><td>{postName(l.post_id)}</td><td className="muted">{skuName(l.sku_id)}</td><td className="muted">{l.head}</td><td className="num">{fmt(l.qty)}</td><td className="num">{fmt((l.weight_kg||0)/1000,2)} t</td><td className="num">₹{fmt(l.expected_cost)}</td></tr>)}
+        </tbody></table></React.Fragment>))}</div>}
+    </div>
+    <div className="card"><div className="card-head"><div className="card-title">Shortfalls <span className="count">{myShort.length} rows · demand no mode can lift — the pre-positioning decision</span></div></div>
+      {myShort.length===0?<div className="card-body muted" style={{fontSize:12.5}}>No shortfall — full coverage.</div>:
+      <div className="card-body flush"><table><thead><tr><th>Post</th><th>Item</th><th>Head</th><th className="num">Tier</th><th className="num">Short</th><th>Cause</th><th>Air possible</th></tr></thead><tbody>
+        {myShort.slice(0,60).map((s,i)=><tr key={i}><td>{postName(s.post_id)}</td><td className="muted">{skuName(s.sku_id)}</td><td className="muted">{s.head}</td><td className="num">{s.tier}</td><td className="num">{fmt((s.shortfall_kg||0)/1000,2)} t</td><td><Pill kind={s.cause==="residual_after_nonroad"?"crit":s.cause==="depot_short"?"warn":"info"}>{(s.cause||"").replace(/_/g," ")}</Pill></td><td>{s.air_resupply_possible?<Pill kind="ok">yes</Pill>:<span className="muted">no</span>}</td></tr>)}
+      </tbody></table>{myShort.length>60&&<div className="card-body muted" style={{fontSize:12}}>Showing the 60 largest of {myShort.length} shortfall rows.</div>}</div>}
+    </div>
   </>);
 }
 function MapScreen({riskAll,go}){
@@ -410,7 +444,7 @@ function MapScreen({riskAll,go}){
     <div className="page-head"><div className="page-title">Map</div><div className="page-sub">Forward posts and depots across Eastern Ladakh on satellite terrain, with the depot→post supply network. Red = at least one SKU at risk (14-day projection). Tap a marker to open the post.</div></div>
     <div className="card"><div className="card-body">
       <MapView riskAll={riskAll} go={go}/>
-      <div className="legend"><span><i style={{background:"#ef4444"}}></i>At-risk post</span><span><i style={{background:"#22c55e"}}></i>Post (ok)</span><span><i style={{background:"#3b82f6",borderRadius:2}}></i>Depot</span><span><i style={{background:"#f59e0b",borderRadius:2}}></i>Pass</span><span><i style={{background:"#7dd3fc",width:14,height:2,borderRadius:0}}></i>Supply route</span></div>
+      <div className="legend"><span><i style={{background:"#ef4444"}}></i>At-risk post</span><span><i style={{background:"#22c55e"}}></i>Post (ok)</span><span><i style={{background:"#3b82f6",borderRadius:2}}></i>Depot</span><span><i style={{background:"#f59e0b",borderRadius:2}}></i>Pass</span><span><i style={{background:"transparent",border:"2px solid #93c5fd",borderRadius:"50%"}}></i>Air-capable (ALG/DZ)</span><span><i style={{background:"#7dd3fc",width:14,height:2,borderRadius:0}}></i>Supply route</span></div>
     </div></div>
   </>);
 }
@@ -452,8 +486,8 @@ function Provenance({diag,snap}){
   return (<>
     <div className="page-head"><div className="page-title">Provenance</div><div className="page-sub">Where these numbers come from. Every output is generated on request by versioned models against a fixed synthetic world.</div></div>
     <div className="card"><div className="card-body"><table><tbody>
-      <tr><td className="muted">Model version</td><td>{L.model_version||"–"}</td></tr><tr><td className="muted">Snapshot date</td><td>{L.snapshot_date||"–"}</td></tr><tr><td className="muted">Data seed</td><td className="num">{L.data_snapshot_seed??"–"}</td></tr><tr><td className="muted">Computed at</td><td className="num">{L.generated_at||"–"}</td></tr><tr><td className="muted">Predictions in snapshot</td><td className="num">{snap?`${fmt(snap.counts.demand)} demand · ${fmt(snap.counts.route)} route · ${fmt(snap.counts.risk)} risk`:"–"}</td></tr><tr><td className="muted">Raw history</td><td className="num">35 posts × 30 SKUs × 1,096 days</td></tr><tr><td className="muted">Model service</td><td>{API_BASE.replace("https://","")}</td></tr>
-    </tbody></table><p style={{fontSize:12.5,color:"var(--ink-muted)",lineHeight:1.6,marginTop:14}}>The raw synthetic world is fixed at seed 42 and does not change. The demand forecaster, route classifier, vehicle scorer, risk composer and OR-Tools optimizer run on request and produce every figure shown. Proofs of functionality on synthetic data, not real-world accuracy claims.</p></div></div>
+      <tr><td className="muted">Model version</td><td>{L.model_version||"–"}</td></tr><tr><td className="muted">Snapshot date</td><td>{L.snapshot_date||"–"}</td></tr><tr><td className="muted">Data seed</td><td className="num">{L.data_snapshot_seed??"–"}</td></tr><tr><td className="muted">Computed at</td><td className="num">{L.generated_at||"–"}</td></tr><tr><td className="muted">Predictions in snapshot</td><td className="num">{snap?`${fmt(snap.counts.demand)} demand · ${fmt(snap.counts.route)} route · ${fmt(snap.counts.risk)} risk`:"–"}</td></tr><tr><td className="muted">Raw history</td><td className="num">35 posts × 30 SKUs × 1,096 days (canonical, seed 42)</td></tr><tr><td className="muted">Live continuation</td><td>day-seeded deterministic stepper (advance_v1) past 2024-12-31 — one sim day per real day, restart-safe by replay</td></tr><tr><td className="muted">Model service</td><td>{API_BASE.replace("https://","")}</td></tr>
+    </tbody></table><p style={{fontSize:12.5,color:"var(--ink-muted)",lineHeight:1.6,marginTop:14}}>The canonical world (2022–2024) is fixed at seed 42 and byte-stable; days beyond it are generated by a deterministic day-seeded stepper, so the same sim date always yields the same world. The demand forecaster, route classifier, vehicle scorer, risk composer and OR-Tools optimizer run on request and produce every figure shown. Proofs of functionality on synthetic data, not real-world accuracy claims.</p></div></div>
   </>);
 }
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
