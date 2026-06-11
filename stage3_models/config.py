@@ -249,5 +249,5 @@ ALERT_HORIZONS = {
 # ─────────────────────────────────────────────────────────────────────────────
 # Model versioning
 # ─────────────────────────────────────────────────────────────────────────────
-MODEL_VERSION = "stage3-v1.0"
+MODEL_VERSION = "stage3-v1.1"   # v1.1 = vehicle scorer v2 (empirical axis multipliers, #1)
 DATA_SNAPSHOT_SEED = 42   # Stage 2 seed used to generate the training data

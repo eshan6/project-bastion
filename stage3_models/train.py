@@ -61,8 +61,10 @@ def main():
     route.save(route_models)
 
     # ── Vehicle reliability ──────────────────────────────────────────────────
-    print("\n[4/4] Vehicle reliability scorer (rule-based, no training)")
-    vehicle.save_scorer_card()
+    print("\n[4/4] Vehicle reliability scorer (v2: fitting axis multipliers on train window)")
+    fit = vehicle.fit_rate_model(data["vehicles"], data["vehicle_events"],
+                                        data["posts"], cfg.TRAIN_END_DATE)
+    vehicle.save_scorer_card(fit)
 
     # Rolling backtest: every Monday across two years (excluding the very last
     # horizon_days, since we can't observe the future beyond Stage 2's end_date).
@@ -73,7 +75,7 @@ def main():
                                           step_days=7)
     eval_path = cfg.REPORT_DIR / "evaluation_vehicle.json"
     eval_path.write_text(json.dumps({"model_version": cfg.MODEL_VERSION,
-                                      "scorer_kind": "rule_weibull_altitude_v1",
+                                      "scorer_kind": vehicle.SCORER_KIND,
                                       **veh_eval}, indent=2, default=str))
     print(f"  rolling backtest ({veh_eval['n_snapshots']} snapshots, "
           f"{veh_eval['n_observations']:,} vehicle-observations):")

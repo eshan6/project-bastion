@@ -255,14 +255,19 @@ def build_vehicle_features(data: dict, as_of_date: str | pd.Timestamp) -> pd.Dat
         events_to_date=("deadline_date", "count"),
         last_event_date=("deadline_date", "max"),
     )
+    # v1.1: trailing-365d event count for the scorer's empirical-Bayes layer
+    recent = past[past["deadline_date"] > as_of - pd.Timedelta(days=365)]
+    by_v = by_v.join(recent.groupby("vehicle_id").size().rename("events_last_365d"))
 
     veh = veh.merge(by_v, left_on="vehicle_id", right_index=True, how="left")
     veh["events_to_date"] = veh["events_to_date"].fillna(0).astype(int)
+    veh["events_last_365d"] = veh["events_last_365d"].fillna(0).astype(int)
 
     # Age: initial_age_days + days from Stage 2 start (2022-01-01) to as_of
     stage2_start = pd.Timestamp("2022-01-01")
     days_elapsed = (as_of - stage2_start).days
     veh["age_days_at_asof"] = veh["initial_age_days"] + days_elapsed
+    veh["as_of"] = as_of   # v1.1: scorer needs the date for season modulation
 
     # If a vehicle had a "return_date" event recently, treat it as effectively
     # "newer" by subtracting recent depot-repair time (a depot repair restores
