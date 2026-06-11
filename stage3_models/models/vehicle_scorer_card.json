@@ -1,19 +1,29 @@
 {
-  "model_version": "stage3-v1.0",
-  "kind": "rule_weibull_altitude_v1",
+  "model_version": "stage3-v1.1",
+  "kind": "rule_weibull_axis_v2",
   "horizon_days": 7,
-  "altitude_hazard_multiplier": 0.0,
-  "axis_altitude_exposure": {
-    "Pangong": 0.35,
-    "DBO": 0.65,
-    "Chushul": 0.45,
-    "Demchok": 0.5,
-    "Hot_Springs": 0.55,
-    "Rear": 0.05
+  "base_rate_per_vehicle_day": 0.001269,
+  "eb_alpha": 7.778,
+  "eb_note": "Gamma-Poisson empirical Bayes on per-vehicle residual rate; posterior u_i = (alpha + k_365)/(alpha + r_i*365). Captures persistent per-vehicle heterogeneity (the band-mix jitter) from unit VOR history alone.",
+  "fit_start": "2022-07-01",
+  "axis_multipliers": {
+    "DBO": 1.1136,
+    "Demchok": 0.9842,
+    "Pangong": 1.0321,
+    "Rear": 0.7434
   },
-  "synthetic_arbitrary_flags": [
-    "altitude_hazard_multiplier (0.4 placeholder)",
-    "axis_altitude_exposure fractions (operationally plausible)"
-  ],
-  "note": "Weibull shape and scale are read at runtime from the vehicles table; the scorer does not retrain them \u2014 it evaluates the analytic survival function with the parameters Stage 2 generated."
+  "class_multipliers": {
+    "BharatBenz-HD": 1.466,
+    "Stallion-4x4": 0.7988,
+    "Stallion-6x6": 1.1475,
+    "Tata-LPTA": 1.0348
+  },
+  "season_multipliers": {
+    "winter": 1.0444,
+    "open": 0.9686
+  },
+  "train_end": "2024-06-30",
+  "n_train_events": 231,
+  "synthetic_arbitrary_flags": [],
+  "note": "Empirical Poisson-rate scorer fitted on train-window VOR events (class x axis x season multipliers on a fleet base rate). No generator internals are read \u2014 this is what a maintenance officer would estimate from unit history. Replaces the v1 Weibull analytic, whose age-dependence was mis-specified for a memoryless process."
 }
