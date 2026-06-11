@@ -27,6 +27,7 @@ from datetime import date
 # ---------------------------------------------------------------------------
 
 DEFAULT_SEED = 42
+SEED = 42   # canonical world seed
 START_DATE = date(2022, 1, 1)
 END_DATE = date(2024, 12, 31)   # 3 years inclusive
 N_DAYS = (END_DATE - START_DATE).days + 1   # 1096
