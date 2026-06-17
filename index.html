@@ -129,6 +129,9 @@ const riskKind=s=>s==="ok"?"ok":(s==="rationing"||s==="warning"||s==="warn")?"wa
 const relKind=r=>r>=0.7?"ok":r>=0.4?"warn":"crit";
 const worstStatus=(a,b)=>{const o={ok:0,rationing:1,warning:1,warn:1,critical:2,stockout:3};return (o[b]??2)>(o[a]??2)?b:a;};
 async function getJSON(path,tries=3){let e;for(let i=0;i<tries;i++){try{const r=await fetch(API_BASE+path,{headers:{accept:"application/json"}});if(!r.ok)throw new Error("HTTP "+r.status);return await r.json();}catch(err){e=err;await new Promise(r=>setTimeout(r,4000));}}throw e;}
+async function postJSON(path,body){const r=await fetch(API_BASE+path,{method:"POST",headers:{"content-type":"application/json",accept:"application/json"},body:JSON.stringify(body)});if(!r.ok)throw new Error("HTTP "+r.status);return await r.json();}
+const loadSaved=()=>{try{return JSON.parse(localStorage.getItem("bastion_saved_plans")||"[]");}catch(e){return [];}};
+const storeSaved=l=>{try{localStorage.setItem("bastion_saved_plans",JSON.stringify(l.slice(-20)));}catch(e){}};
 const Pill=({kind,children})=><span className={"pill "+kind}><span className="d"></span>{children}</span>;
 const Stat=({label,value,unit,sub,crit})=>(<div className={"stat"+(crit?" crit":"")}><div className="l">{label}</div><div className="v num">{value}{unit&&<span className="u">{unit}</span>}</div>{sub&&<div className="s">{sub}</div>}</div>);
 
@@ -278,7 +281,7 @@ function App(){
   const vehAll=(snap&&snap.vehicle_reliability)||[];
   const passProb=(diag&&diag.reachability&&diag.reachability.pass_path_open_prob_at_horizon)||{};
   const postRollup=useMemo(()=>{const m={};riskAll.filter(r=>r.horizon_days===14).forEach(r=>{const k=r.post_id;(m[k]=m[k]||{post_id:k,atRisk:0,worst:"ok",minCover:Infinity});if(r.predicted_status!=="ok")m[k].atRisk++;m[k].worst=worstStatus(m[k].worst,r.predicted_status);m[k].minCover=Math.min(m[k].minCover,r.projected_days_of_cover_p50??Infinity);});return m;},[riskAll]);
-  const nav=[{id:"overview",label:"Overview"},{id:"posts",label:"Posts",badge:Object.keys(postRollup).length||null},{id:"plans",label:"Resupply plans"},{id:"map",label:"Map"},{id:"vehicles",label:"Vehicles"},{id:"provenance",label:"Provenance"}];
+  const nav=[{id:"overview",label:"Overview"},{id:"posts",label:"Posts",badge:Object.keys(postRollup).length||null},{id:"plans",label:"Resupply plans"},{id:"wargame",label:"Wargame"},{id:"map",label:"Map"},{id:"vehicles",label:"Vehicles"},{id:"provenance",label:"Provenance"}];
   const isActive=id=>route===id||(id==="posts"&&(route==="post"||route==="sku"))||(id==="vehicles"&&route==="vehicle")||(id==="plans"&&route==="plan");
   const go=(r,s={})=>{setSel(prev=>({...prev,...s}));setRoute(r);window.scrollTo(0,0);};
   return (
@@ -304,7 +307,8 @@ function App(){
        {route==="post"&&<PostDetail post={sel.post} riskAll={riskAll} horizon={horizon} setHorizon={setHorizon} go={go}/>}
        {route==="sku"&&<SkuDetail post={sel.post} sku={sel.sku} riskAll={riskAll} asOf={asOf} go={go}/>}
        {route==="plans"&&<PlansScreen opt={opt} diag={diag} horizon={horizon} setHorizon={setHorizon} onReplan={()=>load(asOf,horizon)} busy={busy} go={go}/>}
-       {route==="plan"&&<PlanDetail opt={opt} planId={sel.plan} go={go}/>}
+       {route==="plan"&&<PlanDetail opt={opt} planId={sel.plan} asOf={asOf} go={go}/>}
+       {route==="wargame"&&<WargameScreen asOf={asOf} opt={opt} go={go}/>}
        {route==="map"&&<MapScreen riskAll={riskAll} go={go}/>}
        {route==="vehicles"&&<VehiclesScreen vehAll={vehAll} go={go}/>}
        {route==="vehicle"&&<VehicleDetail vehicle={sel.vehicle} vehAll={vehAll} go={go}/>}
@@ -382,14 +386,14 @@ function PlansScreen({opt,diag,horizon,setHorizon,onReplan,busy,go}){
   const plans=(opt&&opt.plans)||[];const cmp=Object.fromEntries(((diag&&diag.plan_comparison)||[]).map(c=>[c.objective,c]));
   const same=plans.length>1&&plans.every(p=>Math.abs((p.coverage_pct||0)-(plans[0].coverage_pct||0))<0.01);
   return (<>
-    <div className="page-head"><div className="page-title">Resupply plans</div><div className="page-sub">Three commitments on a coverage–cost–exposure frontier. full coverage ships everything reachable; min cost and min exposure deliberately leave low-priority tonnage behind (every dropped kg listed per post and SKU) to save money and keep convoys off marginal passes. Tier-1 cargo is identical in all three. Tap a plan for its leg-by-leg detail.</div></div>
+    <div className="page-head"><div className="page-title">Resupply plans</div><div className="page-sub">Three commitments on a coverage–cost–exposure frontier, each dispatched across a scheduled 14-day window — convoys race closing passes and wait out storms (departure days picked per convoy from the route model's 1/3/7/14-day forecasts). min cost and min exposure deliberately leave low-priority tonnage behind (every dropped kg listed per post and SKU). Tier-1 cargo is identical in all three. Tap a plan for its leg-by-leg detail.</div></div>
     <div className="controls"><label>Planning horizon: <b className="num">{horizon} days</b></label><input type="range" min="3" max="45" value={horizon} onChange={e=>setHorizon(+e.target.value)}/><button className="btn primary" disabled={busy} onClick={onReplan}>{busy?"Solving…":"Run replan"}</button>{diag&&<span style={{fontSize:12,color:"var(--ink-faint)"}}>Solved in {(cmp.min_cost&&cmp.min_cost.solve_time_s)||"–"}s</span>}</div>
     {same&&<div className="banner" style={{background:"var(--surface-alt)",border:"1px solid var(--line)",color:"var(--ink-muted)"}}>At this horizon the plans happen to converge on the same coverage ({fmt(plans[0].coverage_pct,1)}%) — the floors are not binding. They diverge when stock or pass availability tightens.</div>}
     <div className="plans">{plans.map(p=>{const c=cmp[p.objective]||{};const best=p.objective==="min_exposure";return <div className={"plan"+(best?" best":"")} key={p.plan_id} style={{cursor:"pointer"}} onClick={()=>go("plan",{plan:p.plan_id})}><div className="ph"><div className="obj">{p.objective.replace("_"," ")}</div><div className="nm">{best?"Recommended":p.objective.replace("_"," ")}{best&&<Pill kind="info">least exposure</Pill>}</div></div><div className="pb"><div className="pr"><span className="lbl">Coverage (reachable)</span><span className="val num">{fmt(c.coverage_reachable_pct??p.coverage_reachable_pct??p.coverage_pct,1)}%</span></div><div className="pr"><span className="lbl">Cost</span><span className="val num">₹{fmt(p.total_cost)}</span></div><div className="pr"><span className="lbl">Convoys / risky</span><span className="val num">{fmt(c.convoys??p.convoys)} / {fmt(p.risky_sorties??c.risky_sorties)}</span></div><div className="pr"><span className="lbl">Exp. in-transit loss</span><span className="val num">{fmt(p.expected_loss_tonnes,1)} t</span></div><div className="pr"><span className="lbl">Deliberately dropped</span><span className="val num">{fmt(p.objective_tradeoff_tonnes,1)} t</span></div><div className="pr"><span className="lbl">Vehicles</span><span className="val num">{c.vehicles_used??p.vehicles_used}</span></div><div className="pr"><span className="lbl">Shortfall</span><span className="val num">{fmt(p.shortfall_tonnes,1)} t</span></div><div className="pr" style={{marginTop:4,borderTop:"1px solid var(--line)",paddingTop:8}}><span className="lbl" style={{color:"var(--accent)",fontWeight:500}}>View legs →</span></div></div></div>;})}</div>
     {diag&&<div className="card" style={{marginTop:14}}><div className="card-head"><div className="card-title">Why these numbers</div></div><div className="card-body">{diag.interpretation.map((t,i)=><div className="interp" key={i}>{t}</div>)}</div></div>}
   </>);
 }
-function PlanDetail({opt,planId,go}){
+function PlanDetail({opt,planId,asOf,go}){
   const plans=(opt&&opt.plans)||[];const legs=(opt&&opt.legs)||[];
   const plan=plans.find(p=>p.plan_id===planId)||{};
   const myLegs=legs.filter(l=>l.plan_id===planId).sort((a,b)=>a.seq-b.seq);
@@ -403,6 +407,7 @@ function PlanDetail({opt,planId,go}){
         {myLegs.map((l,i)=><tr key={i}><td className="num">{l.seq+1}</td><td>{l.vehicle_id}</td><td className="muted">{l.vehicle_class}</td><td className="muted">{postName(l.depot_id)}</td><td>{postName(l.post_id)}</td><td className="muted">{skuName(l.sku_id)}</td><td className="num">{fmt((l.weight_kg||0)/1000,2)} t</td><td className="num">₹{fmt(l.expected_cost)}</td><td className="num">{fmt(l.eta_hours,1)} h</td><td className="num">{pct(l.expected_risk)}</td><td className="num">{pct(l.path_availability)}</td></tr>)}
       </tbody></table>
     </div></div>
+    <PlanEditor baseLegs={myLegs} asOf={asOf}/>
   </>);
 }
 function MapScreen({riskAll,go}){
@@ -455,6 +460,111 @@ function Provenance({diag,snap}){
       <tr><td className="muted">Model version</td><td>{L.model_version||"–"}</td></tr><tr><td className="muted">Snapshot date</td><td>{L.snapshot_date||"–"}</td></tr><tr><td className="muted">Data seed</td><td className="num">{L.data_snapshot_seed??"–"}</td></tr><tr><td className="muted">Computed at</td><td className="num">{L.generated_at||"–"}</td></tr><tr><td className="muted">Predictions in snapshot</td><td className="num">{snap?`${fmt(snap.counts.demand)} demand · ${fmt(snap.counts.route)} route · ${fmt(snap.counts.risk)} risk`:"–"}</td></tr><tr><td className="muted">Raw history</td><td className="num">35 posts × 30 SKUs × 1,096 days</td></tr><tr><td className="muted">Model service</td><td>{API_BASE.replace("https://","")}</td></tr>
     </tbody></table><p style={{fontSize:12.5,color:"var(--ink-muted)",lineHeight:1.6,marginTop:14}}>The raw synthetic world is fixed at seed 42 and does not change. The demand forecaster, route classifier, vehicle scorer, risk composer and OR-Tools optimizer run on request and produce every figure shown. Proofs of functionality on synthetic data, not real-world accuracy claims.</p></div></div>
   </>);
+}
+
+/* ── v3.2: scenario wargaming + wartime mode ─────────────────────────────── */
+const PASSES=Object.keys(SCAFFOLD.passes);
+const PlanCards=({plans,diff})=>(
+  <div className="plans">{plans.map(p=>{
+    const d=diff&&diff[p.objective];
+    return <div className="plan" key={p.plan_id}>
+      <div className="ph"><div className="obj">{p.objective.replace(/_/g," ")}</div><div className="nm">{p.objective.replace(/_/g," ")}</div></div>
+      <div className="pb">
+        <div className="pr"><span className="lbl">Coverage (reachable)</span><span className="val num">{fmt(p.coverage_reachable_pct,1)}%</span></div>
+        <div className="pr"><span className="lbl">Cost</span><span className="val num">₹{fmt(p.total_cost)}</span></div>
+        <div className="pr"><span className="lbl">Convoys / risky</span><span className="val num">{fmt(p.convoys)} / {fmt(p.risky_sorties)}</span></div>
+        <div className="pr"><span className="lbl">Exp. in-transit loss</span><span className="val num">{fmt(p.expected_loss_tonnes,1)} t</span></div>
+        <div className="pr"><span className="lbl">Road-isolated</span><span className="val num">{fmt(p.isolated_tonnes,1)} t</span></div>
+        <div className="pr"><span className="lbl">Dispatch days</span><span className="val num">{Array.isArray(p.dispatch_days_used)?p.dispatch_days_used.join(", "):String(p.dispatch_days_used||"–")}</span></div>
+        {d&&<div className="pr"><span className="lbl">vs peacetime baseline</span><span className="val num" style={{color:(d.coverage_reachable_pct||0)<0?"var(--crit)":"var(--ok)"}}>{(d.coverage_reachable_pct>0?"+":"")+fmt(d.coverage_reachable_pct,1)}% cov · {(d.total_cost>0?"+":"")+"₹"+fmt(d.total_cost)}</span></div>}
+      </div></div>;})}
+  </div>);
+
+function WargameScreen({asOf,opt,go}){
+  const [mode,setMode]=useState("peacetime");
+  const [closures,setClosures]=useState({});       // pass -> % open (0..100)
+  const [surgePost,setSurgePost]=useState("all"),[surge,setSurge]=useState(1);
+  const [depotKnock,setDepotKnock]=useState("none");
+  const [vehLoss,setVehLoss]=useState(0);
+  const [res,setRes]=useState(null),[running,setRunning]=useState(false),[err,setErr]=useState(null);
+  const [saved,setSaved]=useState(loadSaved());
+  const depots=Object.keys(SCAFFOLD.posts).filter(id=>SCAFFOLD.posts[id].is_depot);
+  const run=async()=>{
+    setRunning(true);setErr(null);
+    const scenario={};
+    const pc={};PASSES.forEach(p=>{if(closures[p]!=null&&closures[p]<100)pc[p]=closures[p]/100;});
+    if(Object.keys(pc).length)scenario.pass_closures=pc;
+    if(surge!==1)scenario.demand_multiplier=surgePost==="all"?surge:{[surgePost]:surge};
+    if(depotKnock!=="none")scenario.depot_stock_factor={[depotKnock]:0};
+    if(vehLoss>0)scenario.vehicle_loss_pct=vehLoss;
+    try{const r=await postJSON("/whatif",{date:asOf,scenario,mode});setRes(r);}
+    catch(e){setErr(String(e.message||e));}
+    setRunning(false);
+  };
+  const savePlan=p=>{const l=[...saved,{...p,saved_at:new Date().toISOString(),label:(mode==="wartime"?"WARTIME ":"")+p.objective+" · "+asOf}];setSaved(l);storeSaved(l);};
+  return (<>
+    <div className="page-head"><div className="page-title">Wargame</div><div className="page-sub">Stress the plan before reality does. Close passes, surge demand, destroy depot stock, attrit the fleet — then re-solve the full frontier live. Wartime mode re-prioritises: ammunition becomes Tier-1, tempo and coverage outrank cost, exposure tolerance rises, and a max-tempo plan (earliest feasible dispatch) replaces min-cost.</div></div>
+    <div className="card"><div className="card-head"><div className="card-title">Posture</div></div><div className="card-body">
+      <div className="seg" style={{marginBottom:14}}>{["peacetime","wartime"].map(m=><button key={m} className={mode===m?"on":""} onClick={()=>setMode(m)} style={mode===m&&m==="wartime"?{background:"var(--crit)",color:"#fff"}:{}}>{m==="wartime"?"⚠ Wartime":"Peacetime"}</button>)}</div>
+      <div style={{fontSize:12.5,color:"var(--ink-muted)",marginBottom:14}}>Pass availability (% of forecast P(open) — 0 = demolished/interdicted)</div>
+      {PASSES.map(p=><div className="row" key={p}><span className="nm">{p}</span><input type="range" min="0" max="100" value={closures[p]??100} onChange={e=>setClosures({...closures,[p]:+e.target.value})} style={{flex:1}}/><span className="num" style={{width:42,textAlign:"right"}}>{closures[p]??100}%</span></div>)}
+      <div className="row" style={{marginTop:10}}><span className="nm">Demand surge</span>
+        <select value={surgePost} onChange={e=>setSurgePost(e.target.value)}><option value="all">All posts</option>{Object.keys(SCAFFOLD.posts).filter(id=>!SCAFFOLD.posts[id].is_depot).map(id=><option key={id} value={id}>{postName(id)}</option>)}</select>
+        <input type="range" min="1" max="4" step="0.5" value={surge} onChange={e=>setSurge(+e.target.value)} style={{flex:1}}/><span className="num" style={{width:42,textAlign:"right"}}>{surge}×</span></div>
+      <div className="row"><span className="nm">Depot destroyed</span><select value={depotKnock} onChange={e=>setDepotKnock(e.target.value)}><option value="none">None</option>{depots.map(d=><option key={d} value={d}>{postName(d)}</option>)}</select></div>
+      <div className="row"><span className="nm">Fleet attrition</span><input type="range" min="0" max="80" step="5" value={vehLoss} onChange={e=>setVehLoss(+e.target.value)} style={{flex:1}}/><span className="num" style={{width:42,textAlign:"right"}}>{vehLoss}%</span></div>
+      <button className="btn" disabled={running} onClick={run} style={{marginTop:14}}>{running?"Solving… (~30–60 s, live optimization)":"Run scenario"}</button>
+      {err&&<div className="banner err" style={{marginTop:10}}>Scenario failed: {err}</div>}
+    </div></div>
+    {res&&<>
+      <div className="page-head" style={{marginTop:18}}><div className="page-title" style={{fontSize:17}}>{res.mode==="wartime"?"⚠ Wartime plans":"Scenario plans"}</div><div className="page-sub">Each card shows the change against the unmodified peacetime baseline solved with identical settings — the diff is the scenario's true effect.</div></div>
+      <PlanCards plans={res.plans} diff={res.diff_vs_baseline}/>
+      <div className="card"><div className="card-head"><div className="card-title">Keep a plan</div></div><div className="card-body">{res.plans.map(p=><button key={p.plan_id} className="btn" style={{marginRight:8,marginBottom:8}} onClick={()=>savePlan(p)}>Save {p.objective.replace(/_/g," ")}</button>)}</div></div>
+    </>}
+    {saved.length>0&&<div className="card"><div className="card-head"><div className="card-title">Saved plans <span className="count">{saved.length} · stored in this browser</span></div><button className="btn" onClick={()=>{setSaved([]);storeSaved([]);}}>Clear</button></div><div className="card-body flush">
+      <table><thead><tr><th>Plan</th><th className="num">Coverage</th><th className="num">Cost</th><th className="num">Convoys</th><th className="num">Saved</th></tr></thead><tbody>
+        {saved.slice().reverse().map((p,i)=><tr key={i}><td>{p.label||p.objective}</td><td className="num">{fmt(p.coverage_reachable_pct,1)}%</td><td className="num">₹{fmt(p.total_cost)}</td><td className="num">{p.convoys}</td><td className="num">{(p.saved_at||"").slice(0,16).replace("T"," ")}</td></tr>)}
+      </tbody></table></div></div>}
+  </>);
+}
+
+/* ── v3.2: editable plans → re-optimized custom plan ─────────────────────── */
+function PlanEditor({baseLegs,asOf}){
+  const init=useMemo(()=>{const m={};(baseLegs||[]).forEach(l=>{const k=l.post_id+"|"+l.sku_id;m[k]=(m[k]||0)+(l.qty||0);});return Object.entries(m).map(([k,q])=>{const [p,s]=k.split("|");return {post_id:p,sku_id:s,qty:Math.round(q)};});},[baseLegs]);
+  const [items,setItems]=useState(init);
+  const [addPost,setAddPost]=useState("P018"),[addSku,setAddSku]=useState("RAT-001"),[addQty,setAddQty]=useState(100);
+  const [out,setOut]=useState(null),[running,setRunning]=useState(false),[err,setErr]=useState(null),[savedMsg,setSavedMsg]=useState(false);
+  useEffect(()=>{setItems(init);setOut(null);},[init]);
+  const setQty=(i,q)=>{const c=[...items];c[i]={...c[i],qty:Math.max(0,Math.round(+q||0))};setItems(c);};
+  const run=async()=>{setRunning(true);setErr(null);
+    try{const r=await postJSON("/custom_plan",{date:asOf,items:items.filter(it=>it.qty>0),name:"custom"});setOut(r);}
+    catch(e){setErr(String(e.message||e));}
+    setRunning(false);};
+  const save=()=>{const l=loadSaved();l.push({...out,saved_at:new Date().toISOString(),label:"CUSTOM · "+asOf});storeSaved(l);setSavedMsg(true);setTimeout(()=>setSavedMsg(false),2000);};
+  return (<div className="card"><div className="card-head"><div className="card-title">Edit this plan <span className="count">change quantities, add or drop deliveries, then re-optimize</span></div></div><div className="card-body">
+    <div className="card-body flush" style={{maxHeight:320,overflow:"auto",border:"1px solid var(--line)",borderRadius:8}}>
+      <table><thead><tr><th>Post</th><th>Item</th><th className="num">Quantity (units)</th><th></th></tr></thead><tbody>
+        {items.map((it,i)=><tr key={it.post_id+it.sku_id}><td>{postName(it.post_id)}</td><td className="muted">{skuName(it.sku_id)}</td><td className="num"><input type="number" min="0" value={it.qty} onChange={e=>setQty(i,e.target.value)} style={{width:90,textAlign:"right"}}/></td><td><a onClick={()=>setItems(items.filter((_,j)=>j!==i))} style={{color:"var(--crit)",cursor:"pointer"}}>remove</a></td></tr>)}
+      </tbody></table></div>
+    <div className="row" style={{marginTop:12}}>
+      <select value={addPost} onChange={e=>setAddPost(e.target.value)}>{Object.keys(SCAFFOLD.posts).filter(id=>!SCAFFOLD.posts[id].is_depot).map(id=><option key={id} value={id}>{postName(id)}</option>)}</select>
+      <select value={addSku} onChange={e=>setAddSku(e.target.value)}>{Object.keys(SCAFFOLD.skus).map(id=><option key={id} value={id}>{skuName(id)}</option>)}</select>
+      <input type="number" min="1" value={addQty} onChange={e=>setAddQty(+e.target.value)} style={{width:90}}/>
+      <button className="btn" onClick={()=>setItems([...items,{post_id:addPost,sku_id:addSku,qty:Math.max(1,Math.round(addQty))}])}>Add delivery</button>
+    </div>
+    <button className="btn" disabled={running} onClick={run} style={{marginTop:12}}>{running?"Re-optimizing… (~20–40 s)":"Re-optimize custom plan"}</button>
+    {err&&<div className="banner err" style={{marginTop:10}}>{err}</div>}
+    {out&&<>
+      <div className="stat-grid" style={{marginTop:14}}>
+        <Stat label="Delivered" value={fmt(out.covered_tonnes,1)} unit="t"/>
+        <Stat label="Cost" value={"₹"+fmt(out.total_cost)}/>
+        <Stat label="Convoys / vehicles" value={fmt(out.convoys)+" / "+fmt(out.vehicles_used)}/>
+        <Stat label="Exp. in-transit loss" value={fmt(out.expected_loss_tonnes,1)} unit="t"/>
+      </div>
+      {out.clamped_requests&&out.clamped_requests.length>0&&<div className="banner warn" style={{marginTop:10}}>Some quantities were clamped to available depot stock or road feasibility: {out.clamped_requests.slice(0,4).map(c=>`${postName(c.post_id)} ${skuName(c.sku_id)} ${fmt(c.requested)}→${fmt(c.granted)}`).join("; ")}{out.clamped_requests.length>4?` (+${out.clamped_requests.length-4} more)`:""}</div>}
+      <div style={{marginTop:10}}><button className="btn" onClick={save}>{savedMsg?"Saved ✓":"Save custom plan"}</button><span className="muted" style={{marginLeft:10,fontSize:12}}>{out.legs?out.legs.length:0} delivery legs · departure days {Array.isArray(out.dispatch_days_used)?out.dispatch_days_used.join(", "):"–"}</span></div>
+    </>}
+  </div></div>);
 }
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
