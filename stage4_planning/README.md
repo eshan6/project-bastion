@@ -1,65 +1,56 @@
 # Project Bastion — Stage 4: Planning & Optimization Layer
 
-> **v3.0 (ε-constraint frontier planner).** v2.0's four objectives (min_cost /
-> min_time / min_risk / balanced) were measured producing four near-identical
-> plans: coverage byte-identical, cost within 1.1%, makespan within 8%,
-> aggregate_risk pinned at 1.0 in all four. Root causes (all verified on
-> seed-42 / 15-Dec): Phase-1 allocation never read the objective; 84 of 90
-> convoys were objective-blind full-truck shuttles (only 4.9% of tonnage
-> reached the objective-aware VRP); the fleet has no cost-vs-time tradeoff
-> (cheapest class is also fastest, so min_cost ≡ min_time); and each post has
-> exactly one path, so min_risk had no route to choose. A solver cannot
-> differentiate plans in a formulation that contains no tradeoffs.
+> **v3.4 (multi-modal as a frontier option) + v3.3 (alternate road paths).**
+> These two close the last gaps in "the plans are genuinely different commitments."
 >
-> **v3.0 restructures what the objectives trade.** Three plans that are
-> different *commitments*, not different labels:
-> * **full_coverage** — ship everything reachable (lexicographic max coverage,
->   then min cost; the v2.0 behaviour, honestly named). Reference plan.
-> * **min_cost** — cheapest plan covering ≥98% of the full_coverage tonnage
->   per depot. Drops the most expensive marginal cargo; cheapest ₹/t·km fleet.
-> * **min_exposure** — minimizes tier-weighted expected shortfall (unshipped kg
->   count in full; shipped kg count × P(leg fails)) plus an exposure charge per
->   kg sent over marginal passes (`EXPOSURE_WEIGHT`, SYNTHETIC-INFERRED dial).
->   Refuses low-tier cargo where path P(open) < ~0.33–0.50; staffs convoys to
->   maximize payload × P(vehicle survives). Coverage floor 95%.
-> * **Tier-1 is identical in every plan by construction** (hard restore to the
->   reference allocation). Every deliberately dropped kg appears per post/SKU
->   in `resupply_shortfalls.parquet` with cause **`objective_tradeoff`** — a
->   dropped delivery is a decision the planner can see and overrule, never a
->   silent omission. min_time is **removed** until the world has a real time
->   axis (multi-modal legs / multi-day dispatch); documented in config.py.
+> **v3.3 — alternate road paths.** The synthetic world ships one route per post,
+> so the optimizer could choose who/when/what-mode but never WHICH ROUTE. v3.3
+> derives up to 3 candidate road legs per post at Stage-4 input time (no world
+> regeneration — the generator and its committed rows are untouched): the
+> primary, an alternate-depot route on the same axis, and a pass-variant that
+> reroutes around the post's most-marginal pass. Each carries its own per-slot
+> availability. The objective then PICKS a path: min_exposure takes the safer,
+> longer road; min_cost the shortest; full_coverage the doctrine primary. Effect
+> on seed-42/15-Dec: min_exposure's mean chosen-path availability rises 0.26 →
+> 0.36 and its expected in-transit loss falls ~93 t purely from route choice —
+> a decision the single-path world could not express. A second, free benefit:
+> when a reroutable pass closes (e.g. Chang La), the pass-variant rescues the
+> affected posts by road, so they never become a non-road problem at all.
 >
-> **Allocation bug fix (changes the headline number).** v2.0 allocated per
-> (depot, axis) cluster with the full depot stock cap in each cluster and no
-> decrement; depots P003/P004 serve two axes, and several (depot, SKU) pairs
-> are stock-binding — the same stock was promised to both axes. v3.0 allocates
-> once per depot, jointly across its axes. Honest reachable coverage is
-> **92.5%**, not the previously reported 98.2% (~39 t was double-counted
-> stock). Correctness over polish.
+> **v3.4 — multi-modal inside the frontier.** Phase 3 (air/porter/mule) used to
+> fire only on road-ISOLATED residual. v3.4 lets the EXPOSURE objective
+> PROACTIVELY divert genuinely air/animal-critical cargo (Medical, Ammunition —
+> NOT bulk rations or POL, which you don't air-drop off a 35%-open pass) off a
+> marginal-but-feasible road path onto an all-weather mode, via the SAME
+> mule→porter→air resolver. On seed-42/15-Dec min_exposure mules 6.82 t of
+> medical forward (₹819k) rather than gamble it on near-shut passes, cutting
+> expected in-transit loss 882 → 777 t. Cost/coverage plans still truck
+> everything (cheap); only the exposure-minimising plan pays the non-road
+> premium where it buys arrival certainty. Gated by objective + tier + head +
+> road availability, all in config.
 >
-> **Result on seed-42 / 15-Dec (horizon 14 d):**
+> **The frontier now (seed-42 / 15-Dec):**
 >
-> | plan | reach-coverage | convoys | cost | exp. in-transit loss | deliberately dropped |
+> | plan | reach-cover | cost | exp. in-transit loss | convoys | non-road |
 > |---|---|---|---|---|---|
-> | full_coverage | 92.5% | 82 | ₹722,178 | 504.1 t | 0 t |
-> | min_cost | 90.7% | 81 | ₹711,956 | 496.1 t | 11.8 t |
-> | min_exposure | 88.7% | 79 | ₹701,281 | 481.5 t | 25.2 t |
+> | full_coverage | 92.6% | ₹2,002,447 | 896.7 t | 170 | — |
+> | min_cost | 90.9% | ₹1,967,108 | 882.7 t | 166 | — |
+> | min_exposure | 91.0% | ₹2,781,235 | 777.2 t | 164 | 6.8 t medical (mule) |
 >
-> Deterministic across reruns (byte-identical leg sets, all three plans).
-> ~40 s end-to-end. New plan metrics: `expected_arrived_tonnes`,
-> `expected_loss_tonnes`, `unserved_reachable_tonnes`,
-> `objective_tradeoff_tonnes`, `expected_shortfall_tonnes`, `max_leg_risk`,
-> `risky_sorties`. `aggregate_risk` retained for schema continuity but
-> documented as saturating (P(≥1 of ~80 winter sorties has trouble) ≈ 1 by
-> construction); decisions use the tonnage-denominated metrics. Two honest
-> caveats: `expected_loss_tonnes` is computed at horizon path availability — a
-> conservative exposure index for comparing plans, not a literal arrival
-> forecast (convoys dispatch anticipatorily while roads are open); and at this
-> deep-winter snapshot every convoy crosses a sub-0.5-availability pass, so
-> `risky_sorties` equals convoy count — it discriminates in shoulder seasons,
-> not mid-December.
+> Three genuinely distinct commitments: cheapest-trucks-everything, trim-marginal-
+> cargo, or reroute-safer-and-fly-the-medical. Phase 3 residual mop-up is
+> preserved and verified (closing Zoji La, the universal chokepoint, lifts
+> 258.75 t by mule/porter/air). Determinism re-verified end-to-end at both CLI
+> (15 s) and service (3 s) limits — the residual VRP is pinned to deterministic
+> time so timed-out incumbents are byte-identical across runs.
+>
+> **Still open:** alternate paths and proactive multi-modal are SYNTHETIC-INFERRED
+> topology/doctrine; with real route data and real lift-capacity figures they'd
+> recalibrate. The next structural step is the stochastic (scenario-sampled)
+> planner — robust dispatch across many simulated winters.
 
 ---
+
 
 > **v2.0 (milk-run convoy optimizer).** v1.1 was one-vehicle-one-post: every at-risk
 > post got its own truck, each re-paying the shared mountain trunk (every route in the

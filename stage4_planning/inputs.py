@@ -43,10 +43,28 @@ class Leg:
     route_id: str
     distance_km: float
     passes: list
-    path_availability: float
-    feasible: bool
+    path_availability: float        # v3.1: BEST availability across dispatch slots
+    feasible: bool                  # v3.1: judged at the best slot, not day-14
     has_air_resupply: bool
     days_to_closure: int            # v1.1: how long the inbound path stays usable
+    pa_by_slot: tuple = ()          # v3.1: P(path open) at each ROUTE_HORIZONS_DAYS
+    pa_horizon: float = 0.0         # v3.1: the old single day-14 value, for reference
+    candidates: tuple = ()          # v3.3: alternate PathOption legs (incl. primary)
+
+
+@dataclass
+class PathOption:
+    """v3.3: one candidate road path to a post. The primary plus derived
+    alternates compete inside the optimizer; min_exposure can pick the longer,
+    safer route over the short, marginal-pass one."""
+    kind: str                       # "primary" | "alt_depot" | "pass_variant"
+    depot_id: str
+    route_id: str
+    distance_km: float
+    passes: tuple
+    pa_by_slot: tuple
+    path_availability: float        # best across slots
+    feasible: bool
 
 
 @dataclass
@@ -69,6 +87,8 @@ class Bundle:
     vehicles: list
     vehicles_by_depot: dict
     veh: dict
+    schedule_slots: list = field(default_factory=list)   # v3.1: dispatch days
+    depot_axis_peers: dict = field(default_factory=dict) # v3.3: axis -> [depot ids]
     diagnostics: dict = field(default_factory=dict)
 
 
@@ -108,6 +128,55 @@ def _days_to_closure(passes: list, routes_pred: pd.DataFrame, snap_ts: pd.Timest
     return cfg.DAYS_TO_CLOSURE_DEFAULT
 
 
+def _build_candidates(pid, primary_depot, primary_route_id, primary_dist, primary_passes,
+                      ppass_by_slot, slots, ppass_open, posts_df, axis,
+                      depot_axis_peers, road_dist):
+    """v3.3: derive up to ALT_PATHS_MAX road PathOptions for a post. Primary
+    first, then alternate-depot (same axis), then pass-variant. Deterministic."""
+    def pa_for(passes):
+        sl = tuple(_path_availability(list(passes), ppass_by_slot[h]) for h in slots)
+        best = max(sl) if sl else _path_availability(list(passes), ppass_open)
+        return sl, best
+
+    sl0, best0 = pa_for(primary_passes)
+    opts = [PathOption("primary", primary_depot, primary_route_id, round(primary_dist, 1),
+                       tuple(primary_passes), sl0, best0, best0 >= cfg.PATH_FEASIBILITY_MIN)]
+
+    # ALTERNATE DEPOT: another depot on the same axis (sorted, excluding primary).
+    peers = [d for d in depot_axis_peers.get(axis, []) if d != primary_depot]
+    for alt_depot in sorted(peers):
+        adep = posts_df[posts_df["id"] == alt_depot]
+        if not len(adep):
+            continue
+        # pass-chain via the alternate depot = union of its served_by and the
+        # post's own beyond-depot passes (the alt depot still sits behind the
+        # axis chokepoints, but may bypass one forward pass).
+        alt_passes = sorted(set(adep.iloc[0]["served_by"]))
+        # distance: prefer committed road graph if present, else detour heuristic
+        d = road_dist.get((alt_depot, pid))
+        alt_dist = float(d) if d is not None else primary_dist * cfg.ALT_PATH_DETOUR_RATIO
+        sl, best = pa_for(alt_passes)
+        if best >= best0 + cfg.ALT_PATH_MIN_PA_GAIN or alt_dist < primary_dist:
+            opts.append(PathOption("alt_depot", alt_depot,
+                                   f"{primary_route_id}-ALT-{alt_depot}", round(alt_dist, 1),
+                                   tuple(alt_passes), sl, best,
+                                   best >= cfg.PATH_FEASIBILITY_MIN))
+        if len(opts) >= cfg.ALT_PATHS_MAX:
+            return tuple(opts[:cfg.ALT_PATHS_MAX])
+
+    # PASS-VARIANT: drop the post's MOST MARGINAL pass (lowest current P(open))
+    # and route the rest longer — models a detour that swaps a near-shut pass.
+    if len(primary_passes) >= 2:
+        marg = min(primary_passes, key=lambda pn: ppass_open.get(pn, 0.5))
+        var_passes = tuple(p for p in primary_passes if p != marg)
+        sl, best = pa_for(var_passes)
+        if best >= best0 + cfg.ALT_PATH_MIN_PA_GAIN:
+            opts.append(PathOption("pass_variant", primary_depot,
+                                   f"{primary_route_id}-VAR", round(primary_dist * cfg.ALT_PASS_VARIANT_DETOUR, 1),
+                                   var_passes, sl, best, best >= cfg.PATH_FEASIBILITY_MIN))
+    return tuple(opts[:cfg.ALT_PATHS_MAX])
+
+
 def load_bundle(snapshot_dir: str | Path,
                 planning_horizon: int | None = None) -> Bundle:
     snapshot_dir = Path(snapshot_dir)
@@ -142,6 +211,20 @@ def load_bundle(snapshot_dir: str | Path,
                   for s in sku_meta}
 
     serving_depot = dict(zip(posts["id"], posts["serving_depot_id"]))
+    # v3.3: which depots serve each axis (for alternate-depot candidates)
+    depot_axis_peers: dict = {}
+    _dep_df = posts[posts["is_depot"]]
+    for _, _dp in _dep_df.iterrows():
+        depot_axis_peers.setdefault(str(_dp["axis"]), []).append(str(_dp["id"]))
+    # also let any depot on the post's axis be a peer (forward axes share depots)
+    for _, _p in posts[~posts["is_depot"]].iterrows():
+        ax = str(_p["axis"])
+        depot_axis_peers.setdefault(ax, [])
+    # union depots that actually serve posts on each axis
+    for _, _p in posts[~posts["is_depot"]].iterrows():
+        ax = str(_p["axis"]); d = str(_p["serving_depot_id"])
+        if d not in depot_axis_peers[ax]:
+            depot_axis_peers[ax].append(d)
     has_air = dict(zip(posts["id"], posts["has_air_resupply"]))
     depot_ids = set(posts.loc[posts["is_depot"], "id"])
 
@@ -161,6 +244,14 @@ def load_bundle(snapshot_dir: str | Path,
     rh_route = _nearest_route_horizon(H)
     rp_at = routes_pred[(routes_pred["horizon"] == rh_route) & (routes_pred["date"] == snap_ts)]
     ppass_open = dict(zip(rp_at["pass_name"], rp_at["p_open"]))
+    # v3.1: per-slot pass availability — one map per Stage 3 route horizon
+    # (1/3/7/14 d). Real model outputs only; no interpolation between slots.
+    ppass_by_slot = {}
+    for _h in cfg.ROUTE_HORIZONS_DAYS:
+        _rp_h = routes_pred[(routes_pred["horizon"] == _h) & (routes_pred["date"] == snap_ts)]
+        if len(_rp_h):
+            ppass_by_slot[_h] = dict(zip(_rp_h["pass_name"], _rp_h["p_open"]))
+    slots = sorted(ppass_by_slot)
 
     # ── Scope: which posts enter stocking ────────────────────────────────────
     # gate = isolation gate OR fired alert OR bad worst-case status. depot band excluded.
@@ -181,14 +272,24 @@ def load_bundle(snapshot_dir: str | Path,
         pick = inbound[inbound["origin_id"] == dep]
         rrow = (pick.iloc[0] if len(pick) else inbound.iloc[0])
         passes = list(rrow["passes_crossed"]) if rrow["passes_crossed"] is not None else []
-        pavail = _path_availability(passes, ppass_open)
+        pa_h = _path_availability(passes, ppass_open)
+        pa_slots = tuple(_path_availability(passes, ppass_by_slot[h]) for h in slots)
+        # v3.1: a post is reachable if ANY dispatch slot works — convoys roll on
+        # the best day, not day 14. The old day-14 gate wrote off posts whose
+        # pass is open early in the window.
+        pa_best = max(pa_slots) if pa_slots else pa_h
         d2c = _days_to_closure(passes, routes_pred, snap_ts)
         post_axis[pid] = str(rrow["axis"]) if "axis" in rrow else "?"
+        cands = _build_candidates(
+            pid, str(rrow["origin_id"]), str(rrow["route_id"]), float(rrow["distance_km"]),
+            passes, ppass_by_slot, slots, ppass_open, posts, post_axis[pid],
+            depot_axis_peers, road_dist)
         legs[pid] = Leg(
             post_id=pid, depot_id=str(rrow["origin_id"]), route_id=str(rrow["route_id"]),
             distance_km=float(rrow["distance_km"]), passes=passes,
-            path_availability=pavail, feasible=pavail >= cfg.PATH_FEASIBILITY_MIN,
+            path_availability=pa_best, feasible=pa_best >= cfg.PATH_FEASIBILITY_MIN,
             has_air_resupply=bool(has_air.get(pid, False)), days_to_closure=d2c,
+            pa_by_slot=pa_slots, pa_horizon=pa_h, candidates=cands,
         )
     no_road = [p for p in in_scope if p not in legs]
     in_scope = [p for p in in_scope if p in legs]
@@ -308,5 +409,6 @@ def load_bundle(snapshot_dir: str | Path,
         depot_stock=depot_stock, post_axis=post_axis, road_dist=road_dist,
         substitutions=substitutions,
         vehicles=veh_list, vehicles_by_depot=vehicles_by_depot, veh=veh,
+        schedule_slots=slots, depot_axis_peers=depot_axis_peers,
         diagnostics=diagnostics,
     )

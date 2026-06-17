@@ -56,7 +56,7 @@ REPORT_DIR = ROOT / "reports"
 for _d in (OUTPUT_DIR, REPORT_DIR):
     _d.mkdir(exist_ok=True, parents=True)
 
-MODEL_VERSION = "stage4-v3.0"
+MODEL_VERSION = "stage4-v3.4"   # v3.0 frontier; v3.1 time-expanded; v3.2 costs+wargaming; v3.3 alt-paths; v3.4 multi-modal-in-frontier
 DATA_SNAPSHOT_SEED = 42
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -147,15 +147,28 @@ HEAD_WEIGHT_FALLBACK_KG = {"Rations": 1.0, "POL": 0.85, "Ammunition": 0.05,
 # ─────────────────────────────────────────────────────────────────────────────
 # Vehicle class economics  (all SYNTHETIC-INFERRED) — unchanged from v1.0
 # ─────────────────────────────────────────────────────────────────────────────
+# v3.2 COST RECALIBRATION (was fuel-only ₹18–38/km, arbitrary). Now ALL-IN
+# operating ₹/km (fuel+driver+maintenance+tyres+overhead), anchored to published
+# Indian FTL market rates (LCV ₹15–40, medium ₹20–30, 10-wheeler ₹25–40/km,
+# fuel ≈45% of cost — shipzip.in, Sep-2025) × 1.6 high-altitude multiplier
+# (altitude de-rating, gradients, winter idling, hill-route wear; the 1.6 factor
+# is SYNTHETIC-INFERRED — no public per-km Army audit rate found). Per class:
+#   Tata-LPTA 2.5t ₹25×1.6=40 · Stallion-4x4 5t ₹32×1.6=51
+#   Stallion-6x6 7.5t ₹38×1.6=61 · BharatBenz-HD 10t ₹45×1.6=72
+# Sanity: BharatBenz fuel ≈₹32/km (3km/L × ₹95/L Leh diesel) = 44% of ₹72.
 VEHICLE_CLASS_FUEL_COST_PER_KM = {
-    "Tata-LPTA": 18.0, "Stallion-4x4": 24.0, "Stallion-6x6": 30.0, "BharatBenz-HD": 38.0,
+    "Tata-LPTA": 40.0, "Stallion-4x4": 51.0, "Stallion-6x6": 61.0, "BharatBenz-HD": 72.0,
 }
 VEHICLE_CLASS_SPEED_KMPH = {
     "Tata-LPTA": 25.0, "Stallion-4x4": 24.0, "Stallion-6x6": 22.0, "BharatBenz-HD": 20.0,
 }
+# Per-sortie fixed cost: loading/unloading party, marshalling, escort share,
+# documentation (~10–15% of a sortie's running cost). SYNTHETIC-INFERRED.
 VEHICLE_FIXED_DISPATCH_COST = 5000.0
-DEFAULT_FUEL_COST_PER_KM = 25.0
+DEFAULT_FUEL_COST_PER_KM = 51.0
 DEFAULT_SPEED_KMPH = 23.0
+# SUPERSEDED in v3.1: ETAs now come from the dispatch scheduler (depart day +
+# drive time). Retained only so older scripts importing it do not break.
 PATH_DELAY_HOURS_AT_FULL_CLOSURE = 72.0
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -168,52 +181,27 @@ VEHICLE_HORIZON_DAYS = 7
 # ─────────────────────────────────────────────────────────────────────────────
 # Objectives — v3.0 ε-constraint frontier (REPLACES the v1/v2 four-label set)
 # ─────────────────────────────────────────────────────────────────────────────
-# WHY THE OLD SET WAS RETIRED (measured on seed-42 / 15-Dec, v2.0):
-#   min_cost / min_time / min_risk / balanced produced four plans within 1.1% on
-#   cost, 8% on makespan, byte-identical coverage, and aggregate_risk pinned at
-#   1.0 in all four. Root causes, all verified:
-#     1. Phase-1 allocation ignored the objective → identical manifests.
-#     2. 84 of 90 convoys were objective-blind full-truck shuttles; only 4.9% of
-#        tonnage ever reached the objective-aware VRP.
-#     3. The fleet has NO cost-vs-time tradeoff (cheapest class is also fastest),
-#        so min_cost and min_time were the same objective.
-#     4. Each post has exactly one path, so min_risk had nothing to choose.
-#   min_time is therefore REMOVED until a real time axis exists (multi-modal /
-#   multi-day dispatch). Honest > decorative.
-#
-# THE v3.0 SET — three plans that are different COMMITMENTS, not different labels:
-#   full_coverage : ship everything reachable (lexicographic coverage ≫ cost).
-#                   The doctrine-shaped maximal plan; reference point for floors.
-#   min_cost      : cheapest plan that still covers ≥ COVERAGE_FLOOR_FRAC of the
-#                   full_coverage tonnage per depot (Tier-1 never sacrificed).
-#                   Drops the most expensive marginal tonnage; cheapest ₹/t·km
-#                   vehicle mix.
-#   min_exposure  : minimize tier-weighted EXPECTED SHORTFALL — kg that fail to
-#                   arrive, whether deliberately unshipped (counts in full) or
-#                   shipped over a failing path (counts × P(leg fails)) — plus an
-#                   exposure charge per kg sent over marginal passes. Refuses
-#                   low-tier tonnage over nearly-closed passes; staffs convoys
-#                   with the fleet's most reliable vehicles. Tier-1 floored at
-#                   the full_coverage level; total floored at its
-#                   COVERAGE_FLOOR_FRAC.
-#
-# Floors are PER DEPOT, relative to the full_coverage allocation (which is also
-# solved per depot, jointly across that depot's axes — the v3.0 fix for the
-# v2.0 bug where a depot serving two axes had its stock allocated once per axis).
-COVERAGE_WEIGHT = 1.0e6            # retained: lexicographic weight inside full_coverage
+# The v2 set (min_cost/min_time/min_risk/balanced) produced four near-identical
+# plans: a fixed manifest moved by mostly-identical full-truck shuttles, a fleet
+# with no cost-vs-time tradeoff, and one path per post. v3.0 changes WHAT the
+# objectives trade:
+#   full_coverage : ship everything reachable (lexicographic coverage, then cost).
+#   min_cost      : cheapest plan covering >= COVERAGE_FLOOR_FRAC of full_coverage
+#                   tonnage per depot (Tier-1 never sacrificed).
+#   min_exposure  : minimize tier-weighted expected shortfall + an exposure charge
+#                   per kg over marginal passes; >=95% floor, Tier-1 intact,
+#                   most-reliable convoys. RECOMMENDED DEFAULT.
+# min_time is removed until a real time axis exists (multi-modal / multi-day).
+COVERAGE_WEIGHT = 1.0e6
 TIER_PRIORITY = {1: 5.0, 2: 2.0, 3: 1.0}
 STATUS_PRIORITY = {"stockout": 3.0, "rationing": 1.5, "ok": 1.0}
 OBJECTIVES = ["full_coverage", "min_cost", "min_exposure"]
 COVERAGE_FLOOR_FRAC = {"min_cost": 0.98, "min_exposure": 0.95}
-# Exposure weight: how many tier-weight-equivalents of penalty one kg·P(fail) of
-# shipped cargo carries, representing the men/vehicles put on a marginal pass.
-# At 1.0 the allocation drops tonnage iff P(path fails) > tier_w/(tier_w+1):
-# tier-3 drops below P(open)=0.50, tier-2 below 0.33, tier-1 is hard-floored and
-# never dropped. SYNTHETIC-INFERRED operational judgement; isolated here so a
-# user (or a what-if scenario) can turn the dial.
+# Exposure weight: tier-weight-equivalents of penalty per kg·P(fail) of shipped
+# cargo. At 1.0 the allocator drops tier-3 below P(open)=0.50, tier-2 below 0.33;
+# tier-1 hard-floored. SYNTHETIC-INFERRED; dial editable by scenarios.
 EXPOSURE_WEIGHT = 1.0
-# A convoy counts as a "risky sortie" (reported metric) below this path P(open).
-RISKY_SORTIE_PAVAIL = 0.50
+RISKY_SORTIE_PAVAIL = 0.50      # convoy is a "risky sortie" below this P(open)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Alerting thresholds  (Component 5, steps 5-7) — unchanged from v1.0
@@ -253,3 +241,174 @@ SOLVER_TIME_LIMIT_S = 15.0
 SOLVER_TIME_LIMIT_BY_OBJECTIVE = {"full_coverage": 15.0, "min_cost": 15.0,
                                   "min_exposure": 15.0}
 VRP_VEHICLE_SLACK = 3
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Non-road transport modes (Air / Porter / Mule) — #3 from audit
+# ─────────────────────────────────────────────────────────────────────────────
+# Public record is explicit: forward posts off the road network are supplied by
+# porters, ponies/mules, and air-drop, not trucks. These convert the 586t of
+# road-isolated shortfall into "solvable at higher cost" — the actual decision.
+#
+# Sources:
+#   Tribune (Jan 2025): "animal transport columns including mules and ponies"
+#     carry supplies to posts inaccessible by road; AN-32 air-drops for DBO.
+#   ThePrint (Sep 2024): Mi-17 helicopters for emergency resupply at 15000+ ft;
+#     C-130J landed at DBO ALG (2013).
+#   CAG Report 2017-18: porter/mule logistics costs 3-5x road transport per kg.
+#   Swarajyamag (Oct 2020): "dedicated animal transport units" for forward posts.
+#
+# Three modes, ordered by cost (optimizer resolves in this order):
+
+NON_ROAD_TRANSPORT_MODES = {
+    "mule_column": {
+        # Animal transport column: mules + ponies + handlers.
+        # Capacity: a column of 20 mules carries ~2t per trip (~100kg per mule,
+        # less at extreme altitude). One column per post per planning cycle is
+        # a reasonable logistics constraint. Mules cannot carry bulk fuel (POL)
+        # safely — limited to dry stores, ammo, medical, clothing, engineer.
+        # SYNTHETIC-INFERRED capacity from public "100kg per mule × 20 mule column"
+        # framing in Tribune/Swarajyamag; exact number is operational.
+        "capacity_kg_per_sortie": 2000,       # ~20 mules × 100kg
+        "sorties_available": 5,               # per planning horizon (~1 column/post/day
+                                              # over 5 operating days given weather)
+        "cost_per_kg": 120.0,                 # ₹/kg — CAG "3-5x road" => ~₹80-200/kg
+                                              # at road ₹25-40/t.km × ~50km. Mid-range.
+        "eligible_heads": ["Rations", "Ammunition", "Clothing", "Medical", "Engineer"],
+        # Mules CANNOT carry bulk POL (kerosene drums, diesel) — fire hazard,
+        # weight distribution, and leakage risk on mountain trails.
+        "excluded_heads": ["POL"],
+        "eligible_posts": "all_non_depot",    # any post reachable by trail
+        "weather_gated": True,                # blocked in severe conditions
+        "weather_block_tmin_c": -25.0,        # too cold for animal columns
+        "notes": "Animal transport column. Public record: Tribune, Swarajyamag. "
+                 "SYNTHETIC-INFERRED capacity (20 mules × 100kg per trip).",
+    },
+    "porter_column": {
+        # Human porter column: Army/civilian porters on foot trails.
+        # Lower capacity than mule but can reach posts mules cannot (very high
+        # altitude, very steep terrain). Can carry small POL quantities (jerry cans).
+        # Capacity: 20 porters × 25kg = 500kg per trip.
+        "capacity_kg_per_sortie": 500,        # 20 porters × 25kg
+        "sorties_available": 5,               # per planning horizon
+        "cost_per_kg": 250.0,                 # ₹/kg — more expensive than mule
+        "eligible_heads": ["Rations", "Ammunition", "Clothing", "Medical",
+                           "Engineer", "POL"],  # can carry jerry cans
+        "excluded_heads": [],
+        "eligible_posts": "all_non_depot",    # any post, including >5000m
+        "weather_gated": True,
+        "weather_block_tmin_c": -28.0,        # porters operate in worse conditions
+        "notes": "Human porter column. Can carry small POL (jerry cans). "
+                 "SYNTHETIC-INFERRED capacity (20 porters × 25kg).",
+    },
+    "air_drop": {
+        # AN-32 / Mi-17 air resupply: bulk drop to posts with ALGs/DZs.
+        # Capacity: AN-32 payload ~6.5t, Mi-17 underslung ~4t. We model a
+        # blended sortie capacity of 5t (some drops are heli, some fixed-wing).
+        # Only posts with has_air_resupply=True. Can carry everything including
+        # bulk POL (fuel bladders are standard air-drop cargo for forward posts).
+        # Very expensive: fuel cost + flight hours + packing + DZ crew.
+        "capacity_kg_per_sortie": 5000,       # blended AN-32/Mi-17
+        "sorties_available": 8,               # per planning horizon (weather-limited,
+                                              # aircraft availability, DZ window)
+        "cost_per_kg": 450.0,                 # ₹/kg — order of magnitude from
+                                              # IAF charter rates + logistics overhead
+        "eligible_heads": ["Rations", "POL", "Ammunition", "Clothing",
+                           "Medical", "Engineer"],
+        "excluded_heads": [],
+        "eligible_posts": "air_resupply_only",  # has_air_resupply=True
+        "weather_gated": True,
+        "weather_block_tmin_c": -22.0,        # matches Stage 2 emergency resupply
+        "notes": "AN-32/Mi-17 air-drop. Only posts with ALG/DZ (has_air_resupply). "
+                 "SYNTHETIC-INFERRED capacity and cost; anchored to public IAF "
+                 "fleet capability and Tribune/ThePrint descriptions.",
+    },
+}
+
+# Mode resolution order: cheapest first. All three resolve against the SAME
+# shortfall pool (what road optimization left behind). A cheaper mode that
+# can serve a post+SKU does so; the expensive mode mops up residuals.
+NON_ROAD_MODE_ORDER = ["mule_column", "porter_column", "air_drop"]
+
+# Weather gate for non-road: we use the snapshot-date temperature to determine
+# if non-road modes are weather-blocked. Stage 3 doesn't predict temperature
+# (it's a route/demand model), so we infer from the snapshot month.
+# Dec 15 in Eastern Ladakh: mean min temperature at 4500m is roughly -15 to -25°C.
+# Most mule/porter operations ARE feasible in mid-December; they get blocked
+# during severe WD events. We model a probability of weather-block per the
+# month, applied as a capacity reduction (not a hard on/off).
+NON_ROAD_WEATHER_CAPACITY_FRACTION = {
+    1: 0.40, 2: 0.45, 3: 0.55, 4: 0.70, 5: 0.90, 6: 1.00,
+    7: 1.00, 8: 0.95, 9: 0.85, 10: 0.75, 11: 0.55, 12: 0.45,
+}
+# SYNTHETIC-INFERRED from general high-altitude operational windows.
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# v3.1 dispatch scheduling + v3.2 wargaming / wartime mode
+# ─────────────────────────────────────────────────────────────────────────────
+# Peacetime scheduler uses a mild earliness tiebreak only; max_tempo (wartime)
+# uses a strong one.
+PEACETIME_EARLINESS_WEIGHT = 0.02
+# Interactive endpoints (/whatif, /custom_plan) solve at this per-cluster limit
+# so a 3-plan frontier returns in interactive time; the CLI keeps 15 s.
+SOLVER_TIME_LIMIT_SERVICE_S = 3.0
+# Wartime: tempo+coverage outrank cost, ammunition jumps to Tier-1, exposure
+# tolerance rises. Parameter overrides applied by the scenario engine; every
+# dial editable per request. SYNTHETIC-INFERRED doctrine.
+WARTIME = {
+    "objectives": ["full_coverage", "max_tempo", "min_exposure"],
+    "ammo_tier_override": 1,
+    "exposure_weight": 0.25,
+    "coverage_floor_frac": {"max_tempo": 1.0, "min_exposure": 0.98},
+    "earliness_weight": 0.35,
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# v3.3 — ALTERNATE ROAD PATHS per post (give min_exposure a routing choice)
+# ─────────────────────────────────────────────────────────────────────────────
+# The synthetic world ships ONE route per post (one depot, one pass-chain). With
+# a single path, min_exposure can choose who/when/what-mode but never WHICH
+# ROUTE. v3.3 derives up to ALT_PATHS_MAX candidate ROAD legs per post at
+# Stage-4 input time (no world regeneration — the generator and its committed
+# 2.35M rows are untouched), each with its own per-slot availability:
+#   1. PRIMARY            — the committed route, as-is.
+#   2. ALTERNATE DEPOT    — same axis, a different upstream depot that can feed
+#                           the post; longer haul, possibly a different pass mix.
+#   3. PASS-VARIANT       — re-routes around the post's MOST MARGINAL pass via a
+#                           sibling depot's chain where axis geometry allows;
+#                           longer, but trades a low-P(open) pass for a better one.
+# Candidates are SYNTHETIC-INFERRED topology (distance from the committed road
+# graph + great-circle detour ratio); flagged as such. Determinism: candidates
+# built over sorted keys; ties broken by route_id.
+ALT_PATHS_MAX = 3
+ALT_PATH_DETOUR_RATIO = 1.35     # alternate-depot haul vs primary (longer road)
+ALT_PASS_VARIANT_DETOUR = 1.55   # pass-variant is longer still
+# A candidate is kept only if it is materially different from the primary on
+# availability OR meaningfully shorter detour — avoids near-duplicate options.
+ALT_PATH_MIN_PA_GAIN = 0.05
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# v3.4 — MULTI-MODAL AS A FRONTIER OPTION (not just residual mop-up)
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 3 (air/porter/mule) historically fired only on road-ISOLATED residual.
+# v3.4 lets the EXPOSURE objective PROACTIVELY divert critical cargo off a
+# marginal-but-feasible road path onto an all-weather non-road mode — the real
+# staff decision "this medical is too critical to gamble on a 30%-open pass,
+# send it by mule." Gated by objective + tier + road availability so cost/
+# coverage plans still truck everything (cheap), and only exposure-minimising
+# plans pay the non-road premium where it buys arrival certainty.
+#   - Applies to objective == "min_exposure" (and wartime max_tempo for ammo).
+#   - Diverts SKUs at/above MULTIMODAL_DIVERT_TIER whose best road path
+#     availability < MULTIMODAL_ROAD_PA_THRESHOLD.
+# Diverted cargo enters the SAME Phase 3 resolver (mule→porter→air) as a
+# first-class pre-road manifest, so its cost/legs are reported identically.
+MULTIMODAL_DIVERT_OBJECTIVES = ["min_exposure"]
+MULTIMODAL_DIVERT_TIER = 1                  # Tier-1 only
+# Only genuinely air/animal-critical heads divert. Bulk rations and POL are NOT
+# diverted — you don't air-drop fuel and flour off a 35%-open pass; you accept
+# the road risk or pre-position. Medical and Ammunition are light, critical, and
+# realistically lifted by mule/air. SYNTHETIC-INFERRED doctrine.
+MULTIMODAL_DIVERT_HEADS = ["Medical", "Ammunition"]
+MULTIMODAL_ROAD_PA_THRESHOLD = 0.40         # divert if best road path below this
