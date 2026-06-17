@@ -1,5 +1,66 @@
 # Project Bastion — Stage 4: Planning & Optimization Layer
 
+> **v3.0 (ε-constraint frontier planner).** v2.0's four objectives (min_cost /
+> min_time / min_risk / balanced) were measured producing four near-identical
+> plans: coverage byte-identical, cost within 1.1%, makespan within 8%,
+> aggregate_risk pinned at 1.0 in all four. Root causes (all verified on
+> seed-42 / 15-Dec): Phase-1 allocation never read the objective; 84 of 90
+> convoys were objective-blind full-truck shuttles (only 4.9% of tonnage
+> reached the objective-aware VRP); the fleet has no cost-vs-time tradeoff
+> (cheapest class is also fastest, so min_cost ≡ min_time); and each post has
+> exactly one path, so min_risk had no route to choose. A solver cannot
+> differentiate plans in a formulation that contains no tradeoffs.
+>
+> **v3.0 restructures what the objectives trade.** Three plans that are
+> different *commitments*, not different labels:
+> * **full_coverage** — ship everything reachable (lexicographic max coverage,
+>   then min cost; the v2.0 behaviour, honestly named). Reference plan.
+> * **min_cost** — cheapest plan covering ≥98% of the full_coverage tonnage
+>   per depot. Drops the most expensive marginal cargo; cheapest ₹/t·km fleet.
+> * **min_exposure** — minimizes tier-weighted expected shortfall (unshipped kg
+>   count in full; shipped kg count × P(leg fails)) plus an exposure charge per
+>   kg sent over marginal passes (`EXPOSURE_WEIGHT`, SYNTHETIC-INFERRED dial).
+>   Refuses low-tier cargo where path P(open) < ~0.33–0.50; staffs convoys to
+>   maximize payload × P(vehicle survives). Coverage floor 95%.
+> * **Tier-1 is identical in every plan by construction** (hard restore to the
+>   reference allocation). Every deliberately dropped kg appears per post/SKU
+>   in `resupply_shortfalls.parquet` with cause **`objective_tradeoff`** — a
+>   dropped delivery is a decision the planner can see and overrule, never a
+>   silent omission. min_time is **removed** until the world has a real time
+>   axis (multi-modal legs / multi-day dispatch); documented in config.py.
+>
+> **Allocation bug fix (changes the headline number).** v2.0 allocated per
+> (depot, axis) cluster with the full depot stock cap in each cluster and no
+> decrement; depots P003/P004 serve two axes, and several (depot, SKU) pairs
+> are stock-binding — the same stock was promised to both axes. v3.0 allocates
+> once per depot, jointly across its axes. Honest reachable coverage is
+> **92.5%**, not the previously reported 98.2% (~39 t was double-counted
+> stock). Correctness over polish.
+>
+> **Result on seed-42 / 15-Dec (horizon 14 d):**
+>
+> | plan | reach-coverage | convoys | cost | exp. in-transit loss | deliberately dropped |
+> |---|---|---|---|---|---|
+> | full_coverage | 92.5% | 82 | ₹722,178 | 504.1 t | 0 t |
+> | min_cost | 90.7% | 81 | ₹711,956 | 496.1 t | 11.8 t |
+> | min_exposure | 88.7% | 79 | ₹701,281 | 481.5 t | 25.2 t |
+>
+> Deterministic across reruns (byte-identical leg sets, all three plans).
+> ~40 s end-to-end. New plan metrics: `expected_arrived_tonnes`,
+> `expected_loss_tonnes`, `unserved_reachable_tonnes`,
+> `objective_tradeoff_tonnes`, `expected_shortfall_tonnes`, `max_leg_risk`,
+> `risky_sorties`. `aggregate_risk` retained for schema continuity but
+> documented as saturating (P(≥1 of ~80 winter sorties has trouble) ≈ 1 by
+> construction); decisions use the tonnage-denominated metrics. Two honest
+> caveats: `expected_loss_tonnes` is computed at horizon path availability — a
+> conservative exposure index for comparing plans, not a literal arrival
+> forecast (convoys dispatch anticipatorily while roads are open); and at this
+> deep-winter snapshot every convoy crosses a sub-0.5-availability pass, so
+> `risky_sorties` equals convoy count — it discriminates in shoulder seasons,
+> not mid-December.
+
+---
+
 > **v2.0 (milk-run convoy optimizer).** v1.1 was one-vehicle-one-post: every at-risk
 > post got its own truck, each re-paying the shared mountain trunk (every route in the
 > seed-42 world crosses Zoji La; depot P005 alone serves 12 posts via Zoji La). On this

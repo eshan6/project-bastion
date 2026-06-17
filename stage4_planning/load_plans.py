@@ -73,13 +73,15 @@ def main():
                "horizon_days": diag.get("planning_horizon_days")}
     params = {"planning_horizon_days": diag.get("planning_horizon_days"),
               "reserve_days": 7, "coverage_weight": 1e6,
-              "solver": "CBC", "objectives": ["min_cost", "min_time", "min_risk", "balanced"]}
+              "solver": "GLOP+CP-SAT",
+              "objectives": ["full_coverage", "min_cost", "min_exposure"],
+              "formulation": "epsilon-constraint frontier v3.0 (per-depot joint allocation)"}
     cur.execute(
         "INSERT INTO bastion_provenance.model_version (kind,name,algorithm,params,metrics,trained_on_snapshot,notes) "
         "VALUES ('optimizer',%s,%s,%s,%s,%s,%s) "
         "ON CONFLICT (kind,name) DO UPDATE SET metrics=EXCLUDED.metrics, params=EXCLUDED.params "
         "RETURNING model_version_id",
-        (MODEL_VERSION_NAME, "OR-Tools MIP (capacitated assignment, coverage-dominant, 4 objectives)",
+        (MODEL_VERSION_NAME, "OR-Tools two-phase exact planner (eps-constraint frontier, 3 objectives)",
          json.dumps(params), json.dumps(metrics), snap,
          "Stage 4 planner. Plans P90 worst-case deficit, anticipatory dispatch; isolation surfaced as shortfall."))
     mv_opt = cur.fetchone()[0]
