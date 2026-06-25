@@ -469,6 +469,62 @@ REPAIR_TIME_DEPOT_DAYS = (3, 10)
 REPAIR_TIME_FIELD_DAYS = (1, 4)
 DEADLINE_REQUIRES_DEPOT_PROB = 0.35
 
+# ─────────────────────────────────────────────────────────────────────────────
+# v3.5 (Phase 1) — SPARES CATALOGUE + FAILURE→PARTS MAPPING
+# ─────────────────────────────────────────────────────────────────────────────
+# PDS 5 ("AI Based Preventive Maintenance ... and Demand Forecast of Spares")
+# asks for spare-part demand prediction. To forecast it we must first GENERATE
+# ground-truth spares consumption: each vehicle deadline event consumes a set of
+# spare SKUs determined by the failure subsystem, vehicle class, and altitude
+# band at failure. The catalogue and consumption quantities below are
+# SYNTHETIC-ARBITRARY (no public Army spares-consumption table exists; the
+# subsystem taxonomy is anchored to standard B-vehicle assemblies). Flagged as
+# such on every emitted row (provenance: 'synthetic-arbitrary').
+#
+# Subsystems a deadline event can be attributed to, with base probability. The
+# split is the same for every class; class differences come through the parts
+# list and quantities, not the failure mix.
+VEHICLE_FAILURE_SUBSYSTEMS = {
+    "engine_cooling":   0.18,   # radiator, hoses, coolant, thermostat
+    "drivetrain":       0.22,   # clutch, gearbox seals, propshaft UJ
+    "running_gear":     0.24,   # springs, shackles, bushes, wheel bearings
+    "brakes":           0.14,   # linings, slack adjusters, air lines
+    "electrical":       0.12,   # alternator, batteries, glow/starter
+    "filtration":       0.10,   # air/fuel/oil filters (routine but event-linked)
+}
+# Spare SKU catalogue (SPR-*). weight_kg used for downstream multimodal lift.
+SPARES_CATALOGUE = {
+    "SPR-001": {"name": "Radiator assembly",       "subsystem": "engine_cooling", "weight_kg": 28.0, "unit_cost": 42000},
+    "SPR-002": {"name": "Coolant hose + thermostat","subsystem": "engine_cooling", "weight_kg": 3.5,  "unit_cost": 4200},
+    "SPR-003": {"name": "Clutch assembly",         "subsystem": "drivetrain",     "weight_kg": 34.0, "unit_cost": 56000},
+    "SPR-004": {"name": "Gearbox seal kit",        "subsystem": "drivetrain",     "weight_kg": 2.0,  "unit_cost": 6800},
+    "SPR-005": {"name": "Propshaft UJ",            "subsystem": "drivetrain",     "weight_kg": 6.5,  "unit_cost": 9500},
+    "SPR-006": {"name": "Leaf spring + shackle",   "subsystem": "running_gear",   "weight_kg": 45.0, "unit_cost": 18000},
+    "SPR-007": {"name": "Wheel bearing kit",       "subsystem": "running_gear",   "weight_kg": 4.0,  "unit_cost": 7200},
+    "SPR-008": {"name": "Suspension bush set",     "subsystem": "running_gear",   "weight_kg": 2.5,  "unit_cost": 3100},
+    "SPR-009": {"name": "Brake lining set",        "subsystem": "brakes",         "weight_kg": 8.0,  "unit_cost": 5400},
+    "SPR-010": {"name": "Slack adjuster + airline","subsystem": "brakes",         "weight_kg": 3.0,  "unit_cost": 4800},
+    "SPR-011": {"name": "Alternator",              "subsystem": "electrical",     "weight_kg": 7.0,  "unit_cost": 16000},
+    "SPR-012": {"name": "Battery (HD, cold-rated)","subsystem": "electrical",     "weight_kg": 24.0, "unit_cost": 12500},
+    "SPR-013": {"name": "Starter + glow set",      "subsystem": "electrical",     "weight_kg": 9.0,  "unit_cost": 11000},
+    "SPR-014": {"name": "Filter set (air/fuel/oil)","subsystem": "filtration",    "weight_kg": 5.0,  "unit_cost": 2600},
+}
+# For each subsystem: the SKUs it can draw, with per-event probability of each
+# being consumed and a small integer quantity range. Deterministic from RNG.
+SUBSYSTEM_PARTS = {
+    "engine_cooling": [("SPR-001", 0.45, (1, 1)), ("SPR-002", 0.80, (1, 2))],
+    "drivetrain":     [("SPR-003", 0.55, (1, 1)), ("SPR-004", 0.60, (1, 1)), ("SPR-005", 0.30, (1, 2))],
+    "running_gear":   [("SPR-006", 0.50, (1, 2)), ("SPR-007", 0.65, (1, 2)), ("SPR-008", 0.70, (2, 4))],
+    "brakes":         [("SPR-009", 0.85, (1, 2)), ("SPR-010", 0.40, (1, 2))],
+    "electrical":     [("SPR-011", 0.35, (1, 1)), ("SPR-012", 0.55, (1, 2)), ("SPR-013", 0.30, (1, 1))],
+    "filtration":     [("SPR-014", 0.95, (1, 1))],
+}
+# Cold-start damage: a vehicle's accumulated cold-starts (mission-days started
+# below this temp proxy — here, winter forward/mid days) raise the electrical
+# and engine_cooling consumption multiplier. Anchors the "winter wrecks
+# batteries and cooling" pattern. SYNTHETIC-INFERRED magnitude.
+COLD_START_PARTS_MULT_AT_MAX = 1.8     # at the heaviest cold-start exposure
+
 # ---------------------------------------------------------------------------
 # Holiday / religious calendar tempo modifiers
 # ---------------------------------------------------------------------------
@@ -725,3 +781,28 @@ PROVENANCE = {
         "Spoilage daily fractions for perishables (order-of-magnitude estimate)",
     ],
 }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-vehicle mission-band mix + duty intensity (moved from vehicles.py in v3.5
+# so world.build_vehicles can persist them as columns and vehicles.py can read
+# them — single source of truth).
+# ─────────────────────────────────────────────────────────────────────────────
+AXIS_MISSION_BAND_MIX = {
+    "DBO":         (0.15, 0.25, 0.60),   # DS-DBO hauls — most forward-heavy
+    "Hot_Springs": (0.20, 0.30, 0.50),
+    "Demchok":     (0.25, 0.35, 0.40),
+    "Chushul":     (0.25, 0.35, 0.40),
+    "Pangong":     (0.30, 0.40, 0.30),
+    "Rear":        (0.70, 0.25, 0.05),   # inter-depot shuttles
+}
+# Dirichlet concentration for per-vehicle jitter around the axis mix.
+# 12 gives wide within-axis spread (±12-18pp band shares) — vehicles get
+# cross-attached to other axes' convoys; assignments are sticky but uneven.
+VEHICLE_MIX_DIRICHLET_CONCENTRATION = 12.0
+
+# Persistent per-vehicle duty intensity: lognormal, mean 1. sigma=0.30 gives a
+# P90/P10 usage ratio of ~2.2x — consistent with the km/vehicle/month spread
+# any real fleet shows (some vehicles run daily, some sit in reserve).
+# SYNTHETIC-INFERRED magnitude; the existence of the spread is not in question.
+VEHICLE_DUTY_INTENSITY_SIGMA = 0.30

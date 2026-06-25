@@ -46,7 +46,19 @@ from config import (
     REPAIR_TIME_DEPOT_DAYS, REPAIR_TIME_FIELD_DAYS,
     DEADLINE_REQUIRES_DEPOT_PROB,
     START_DATE, END_DATE, N_DAYS,
+    VEHICLE_FAILURE_SUBSYSTEMS, SUBSYSTEM_PARTS, SPARES_CATALOGUE,
+    COLD_START_PARTS_MULT_AT_MAX,
+    AXIS_MISSION_BAND_MIX, VEHICLE_MIX_DIRICHLET_CONCENTRATION,
+    VEHICLE_DUTY_INTENSITY_SIGMA,
 )
+
+# v3.5: nominal one-way mission distance (km) by band — used only to accumulate
+# an OBSERVABLE cumulative-altitude-km odometer per vehicle (a covariate the
+# scorer can train on). Magnitudes are SYNTHETIC-INFERRED; the point is the
+# per-vehicle SPREAD, which is what makes risk learnable.
+BAND_MISSION_KM = {"depot": 40.0, "mid": 90.0, "forward": 150.0}
+# Altitude-km only counts mid+forward (the wearing kind). Cold-starts accrue on
+# winter mid/forward mission-days.
 from world import World
 
 
@@ -57,25 +69,6 @@ from world import World
 # its home depot serves. SYNTHETIC-INFERRED shares; structure anchored to the
 # fact that DS-DBO / Chushul convoy legs run at 4500-5500m while Karu/Leh
 # rear shuttles stay near 3500m.
-AXIS_MISSION_BAND_MIX = {
-    "DBO":         (0.15, 0.25, 0.60),   # DS-DBO hauls — most forward-heavy
-    "Hot_Springs": (0.20, 0.30, 0.50),
-    "Demchok":     (0.25, 0.35, 0.40),
-    "Chushul":     (0.25, 0.35, 0.40),
-    "Pangong":     (0.30, 0.40, 0.30),
-    "Rear":        (0.70, 0.25, 0.05),   # inter-depot shuttles
-}
-# Dirichlet concentration for per-vehicle jitter around the axis mix.
-# 12 gives wide within-axis spread (±12-18pp band shares) — vehicles get
-# cross-attached to other axes' convoys; assignments are sticky but uneven.
-VEHICLE_MIX_DIRICHLET_CONCENTRATION = 12.0
-
-# Persistent per-vehicle duty intensity: lognormal, mean 1. sigma=0.30 gives a
-# P90/P10 usage ratio of ~2.2x — consistent with the km/vehicle/month spread
-# any real fleet shows (some vehicles run daily, some sit in reserve).
-# SYNTHETIC-INFERRED magnitude; the existence of the spread is not in question.
-VEHICLE_DUTY_INTENSITY_SIGMA = 0.30
-
 
 def depot_axis_map(posts_df: pd.DataFrame) -> Dict[str, str]:
     """Map each depot to the modal axis of the non-depot posts it serves.
@@ -146,20 +139,56 @@ def daily_hazard_increment(rng: np.random.Generator, dt: date,
     return base_hazard_per_mission_day * mult
 
 
+def _draw_spares_for_event(rng: np.random.Generator, vehicle_id: str,
+                           vehicle_class: str, deadline_date: date,
+                           cold_start_exposure: float) -> tuple:
+    """v3.5: pick a failure subsystem then its consumed spare SKUs. Returns
+    (subsystem, [spare rows]). Deterministic given RNG state. Cold-start
+    exposure (0..1) raises electrical/cooling part probability — the
+    'winter kills batteries and radiators' pattern."""
+    subs = list(VEHICLE_FAILURE_SUBSYSTEMS.keys())
+    probs = np.array([VEHICLE_FAILURE_SUBSYSTEMS[s] for s in subs], dtype=float)
+    probs = probs / probs.sum()
+    subsystem = subs[int(rng.choice(len(subs), p=probs))]
+    cold_mult = 1.0
+    if subsystem in ("electrical", "engine_cooling"):
+        cold_mult = 1.0 + (COLD_START_PARTS_MULT_AT_MAX - 1.0) * cold_start_exposure
+    rows = []
+    for sku, p_consume, (qmin, qmax) in SUBSYSTEM_PARTS[subsystem]:
+        if rng.random() < min(1.0, p_consume * cold_mult):
+            qty = int(rng.integers(qmin, qmax + 1))
+            if qty > 0:
+                rows.append({
+                    "vehicle_id": vehicle_id, "vehicle_class": vehicle_class,
+                    "deadline_date": deadline_date, "subsystem": subsystem,
+                    "sku": sku, "qty": qty,
+                    "weight_kg": round(SPARES_CATALOGUE[sku]["weight_kg"] * qty, 1),
+                    "provenance": "synthetic-arbitrary",
+                })
+    return subsystem, rows
+
+
 def simulate_vehicle(rng: np.random.Generator, vehicle: dict,
                       pass_status_lookup: dict,
                       relevant_passes: List[str],
                       band_mix: np.ndarray,
-                      duty_intensity: float = 1.0) -> List[dict]:
+                      duty_intensity: float = 1.0) -> tuple:
     """Simulate one vehicle over the 3yr horizon. Tracks cumulative hazard
-    until threshold breach → deadline → repair → resume."""
-    scale = vehicle["weibull_scale_days"]
+    until threshold breach → deadline → repair → resume.
 
+    v3.5: also accumulates two OBSERVABLE odometers — cumulative altitude-km
+    (mid+forward mission distance) and cold-start count (winter mid/forward
+    mission-days) — written onto every event so the Stage 3 scorer can train on
+    per-vehicle wear instead of axis averages. Emits spares consumption per
+    event. Returns (events, spares)."""
+    scale = vehicle["weibull_scale_days"]
     threshold = sample_event_threshold(rng)
     initial_age = vehicle["initial_age_days"]
-    cum_hazard = 0.5 * (initial_age / scale)   # crude age pre-load
+    cum_hazard = 0.5 * (initial_age / scale)
 
-    events = []
+    cum_alt_km = 0.0          # observable odometer (mid+forward km)
+    cold_starts = 0           # observable odometer (winter mid/fwd starts)
+    events, spares = [], []
     d = START_DATE
     in_repair = False
     repair_until = START_DATE
@@ -172,38 +201,55 @@ def simulate_vehicle(rng: np.random.Generator, vehicle: dict,
                 d += timedelta(days=1)
                 continue
 
-        if d.month in (11, 12, 1, 2, 3):
-            mission_p = MISSIONS_PER_MONTH_WINTER / 30.0
-        else:
-            mission_p = MISSIONS_PER_MONTH_OPEN / 30.0
+        winter = d.month in (11, 12, 1, 2, 3)
+        mission_p = (MISSIONS_PER_MONTH_WINTER if winter else MISSIONS_PER_MONTH_OPEN) / 30.0
 
         if rng.random() < mission_p:
-            cum_hazard += duty_intensity * daily_hazard_increment(
-                rng, d, pass_status_lookup, relevant_passes, scale, band_mix)
+            band = rng.choice(["depot", "mid", "forward"], p=band_mix)
+            # accumulate observable wear odometers
+            cum_alt_km += duty_intensity * BAND_MISSION_KM[band] * (band != "depot")
+            if winter and band != "depot":
+                cold_starts += 1
+            # hazard increment (same math as v2, band already drawn above)
+            mult = VEHICLE_HAZARD_ALTITUDE_MULT[band]
+            if winter:
+                mult *= VEHICLE_HAZARD_WINTER_MULT
+            if any(not pass_status_lookup.get((p, d), True) for p in relevant_passes):
+                mult *= VEHICLE_HAZARD_DISRUPTION_MULT
+            cum_hazard += duty_intensity * (1.0 / scale) * mult
+
             if cum_hazard >= threshold:
                 if rng.random() < DEADLINE_REQUIRES_DEPOT_PROB:
-                    repair_days = int(rng.integers(*REPAIR_TIME_DEPOT_DAYS))
-                    repair_loc = "depot"
+                    repair_days = int(rng.integers(*REPAIR_TIME_DEPOT_DAYS)); repair_loc = "depot"
                 else:
-                    repair_days = int(rng.integers(*REPAIR_TIME_FIELD_DAYS))
-                    repair_loc = "field"
+                    repair_days = int(rng.integers(*REPAIR_TIME_FIELD_DAYS)); repair_loc = "field"
                 return_date = d + timedelta(days=repair_days)
+                # cold-start exposure proxy in [0,1]: saturating in accumulated
+                # cold-starts (≈full exposure by ~120 winter starts)
+                cold_exp = min(1.0, cold_starts / 120.0)
+                subsystem, spare_rows = _draw_spares_for_event(
+                    rng, vehicle["vehicle_id"], vehicle["vehicle_class"], d, cold_exp)
                 events.append({
                     "vehicle_id": vehicle["vehicle_id"],
                     "vehicle_class": vehicle["vehicle_class"],
-                    "deadline_date": d,
-                    "return_date": return_date,
-                    "repair_days": repair_days,
-                    "repair_location": repair_loc,
-                    "winter_flag": d.month in (11, 12, 1, 2, 3),
+                    "deadline_date": d, "return_date": return_date,
+                    "repair_days": repair_days, "repair_location": repair_loc,
+                    "winter_flag": winter,
+                    "subsystem": subsystem,
+                    # observable covariates AT failure time
+                    "age_days_at_event": initial_age + (d - START_DATE).days,
+                    "cum_altitude_km": round(cum_alt_km, 1),
+                    "cold_starts": cold_starts,
+                    "n_spare_skus": len(spare_rows),
                 })
+                spares.extend(spare_rows)
                 in_repair = True
                 repair_until = return_date
                 cum_hazard = 0.0
                 threshold = sample_event_threshold(rng) * 0.85
         d += timedelta(days=1)
 
-    return events
+    return events, spares
 
 
 def generate_vehicle_events(world: World, pass_status_df: pd.DataFrame,
@@ -214,19 +260,30 @@ def generate_vehicle_events(world: World, pass_status_df: pd.DataFrame,
     pass_status_lookup = pass_status_df.set_index(["pass_name", "date"])["is_open"].to_dict()
     all_passes = list(pass_status_df["pass_name"].unique())
 
-    # v2: draw persistent per-vehicle band mixes FIRST (single RNG pass,
-    # vehicles-table order), then simulate. Deterministic for a seed.
-    band_mixes = draw_vehicle_band_mixes(rng, world.vehicles, world.posts)
-    duty = draw_duty_intensities(rng, world.vehicles)
+    # v3.5: band mix + duty intensity are now PERSISTED on the vehicles table
+    # (drawn in world.build_vehicles, same RNG order). Read them here so the
+    # generated events are consistent with the observable covariates the scorer
+    # trains on. Backward-compatible: fall back to redrawing if columns absent.
+    have_cols = {"band_mix_depot", "band_mix_mid", "band_mix_forward",
+                 "duty_intensity"}.issubset(world.vehicles.columns)
+    if not have_cols:
+        band_mixes = draw_vehicle_band_mixes(rng, world.vehicles, world.posts)
+        duty = draw_duty_intensities(rng, world.vehicles)
 
-    all_events = []
+    all_events, all_spares = [], []
     for _, v in world.vehicles.iterrows():
         vd = v.to_dict()
-        events = simulate_vehicle(rng, vd, pass_status_lookup, all_passes,
-                                   band_mixes[vd["vehicle_id"]],
-                                   duty[vd["vehicle_id"]])
+        if have_cols:
+            mix = np.array([vd["band_mix_depot"], vd["band_mix_mid"], vd["band_mix_forward"]])
+            di = float(vd["duty_intensity"])
+        else:
+            mix = band_mixes[vd["vehicle_id"]]; di = duty[vd["vehicle_id"]]
+        events, spares = simulate_vehicle(rng, vd, pass_status_lookup, all_passes, mix, di)
         all_events.extend(events)
-    return pd.DataFrame(all_events)
+        all_spares.extend(spares)
+    events_df = pd.DataFrame(all_events)
+    spares_df = pd.DataFrame(all_spares)
+    return events_df, spares_df
 
 
 def validate_vehicles(events_df: pd.DataFrame, world: World) -> dict:
@@ -275,8 +332,8 @@ if __name__ == "__main__":
     w = build_world(seed=42)
     wx, _ = generate_weather(w, seed=42)
     _, status = generate_pass_closures(w, wx, seed=42)
-    ev = generate_vehicle_events(w, status, seed=42)
-    print(f"Vehicle deadline events: {len(ev)}")
+    ev, spares = generate_vehicle_events(w, status, seed=42)
+    print(f"Vehicle deadline events: {len(ev)}  |  spares rows: {len(spares)}")
     print()
     if len(ev):
         print(ev.head().to_string(index=False))

@@ -88,8 +88,9 @@ def main():
     # --- Stage 2.4: vehicle deadline events ---
     print("[5/6] Generating vehicle events...")
     t1 = time.time()
-    vehicle_events_df = generate_vehicle_events(world, pass_status_df, seed=args.seed)
-    print(f"  {len(vehicle_events_df)} vehicle deadline events ({time.time()-t1:.1f}s)")
+    vehicle_events_df, spares_consumption_df = generate_vehicle_events(world, pass_status_df, seed=args.seed)
+    print(f"  {len(vehicle_events_df)} vehicle deadline events, "
+          f"{len(spares_consumption_df)} spares-consumption rows ({time.time()-t1:.1f}s)")
 
     # --- Stage 2.5: stock dynamics (needs consumption + pass status + weather) ---
     # The forward accounting identity: opening + AWS + routine - consumption
@@ -117,6 +118,7 @@ def main():
     write_parquet(consumption_df, out_dir, "consumption_daily")
     write_parquet(tempo_df,       out_dir, "tempo_daily")
     write_parquet(vehicle_events_df, out_dir, "vehicle_events")
+    write_parquet(spares_consumption_df, out_dir, "spares_consumption")
     write_parquet(stock_df,       out_dir, "stock_daily")
     write_parquet(aws_plan_df,    out_dir, "aws_plan")
     print()

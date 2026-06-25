@@ -181,7 +181,37 @@ def build_vehicles(rng: np.random.Generator, posts_df: pd.DataFrame) -> pd.DataF
                 "weibull_scale_days": cls["weibull_scale_days"],
             })
             vid += 1
-    return pd.DataFrame(vehicles)
+    df = pd.DataFrame(vehicles)
+    # v3.5 (Phase 1): persist per-vehicle hazard DRIVERS as observable columns
+    # so the Stage 3 scorer can train on real covariates instead of axis
+    # averages (the root cause of the ~0 Brier skill). band_mix_forward is the
+    # forward-band share of the vehicle's persistent mission mix; duty_intensity
+    # is its lognormal usage multiplier. Both were previously latent (computed
+    # in the event simulator and discarded). Drawn here in vehicles-table order,
+    # deterministic for a seed; the event simulator now READS them.
+    from config import (AXIS_MISSION_BAND_MIX, VEHICLE_MIX_DIRICHLET_CONCENTRATION,
+                        VEHICLE_DUTY_INTENSITY_SIGMA)
+    non_depots = posts_df[~posts_df["is_depot"]]
+    mode = non_depots.groupby("serving_depot_id")["axis"].agg(
+        lambda s: s.value_counts().index[0] if len(s) else "Rear")
+    d2a = {d: "Rear" for d in depots["id"]}
+    for depot_id, axis in mode.items():
+        d2a[depot_id] = axis
+    fwd, mids, depo, duty, axes = [], [], [], [], []
+    s = VEHICLE_DUTY_INTENSITY_SIGMA
+    for _, v in df.iterrows():
+        axis = d2a.get(v["home_depot_id"], "Rear")
+        base = np.asarray(AXIS_MISSION_BAND_MIX.get(axis, AXIS_MISSION_BAND_MIX["Rear"]))
+        mix = rng.dirichlet(base * VEHICLE_MIX_DIRICHLET_CONCENTRATION)
+        depo.append(float(mix[0])); mids.append(float(mix[1])); fwd.append(float(mix[2]))
+        duty.append(float(rng.lognormal(mean=-0.5 * s * s, sigma=s)))
+        axes.append(axis)
+    df["home_axis"] = axes
+    df["band_mix_depot"] = depo
+    df["band_mix_mid"] = mids
+    df["band_mix_forward"] = fwd
+    df["duty_intensity"] = duty
+    return df
 
 
 # ---------------------------------------------------------------------------
