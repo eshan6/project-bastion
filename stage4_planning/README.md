@@ -1,5 +1,27 @@
 # Project Bastion — Stage 4: Planning & Optimization Layer
 
+> **v3.5 (Phase 3 — inducted-platform commitment).** The Army is actively
+> procuring IC-engine logistic drones (CPDS PDS 15) and robotic mules (ATB
+> induction). v3.5 models these as NAMED PLATFORMS with their own
+> payload/turnaround/fleet/weather envelopes, layered on the existing non-road
+> resolver. When road + scheduling cannot reach a post, the planner now commits
+> these platforms FIRST (hardest posts first — air-DZ then most isolated),
+> falling back to legacy animal/manned columns for what they cannot carry/reach.
+> The output is a PLATFORM COMMITMENT — "commit N drones / M robotic-mule
+> sections to these posts" — which answers the procurement question PDS 15/16
+> actually pose, not just a tonnage figure. Surfaced per plan
+> (platform_commitment), persisted on the non-road legs (platform/platform_name
+> columns), and shown in a frontend card. On a Zoji-La-closed scenario the
+> planner commits all 6 drones + 20 robotic-mule sections to the isolated posts;
+> on the normal snapshot min_exposure's proactive medical diversion now prefers
+> the cheaper robotic mule (₹90/kg) over the animal column (₹120/kg). Platform
+> envelopes are SYNTHETIC-INFERRED, anchored to the PDS text; every commitment
+> row carries provenance='synthetic-inferred'. Determinism re-verified
+> end-to-end. No world regeneration — pure Stage-4 layer.
+
+---
+
+
 > **v3.4 (multi-modal as a frontier option) + v3.3 (alternate road paths).**
 > These two close the last gaps in "the plans are genuinely different commitments."
 >

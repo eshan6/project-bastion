@@ -56,7 +56,7 @@ REPORT_DIR = ROOT / "reports"
 for _d in (OUTPUT_DIR, REPORT_DIR):
     _d.mkdir(exist_ok=True, parents=True)
 
-MODEL_VERSION = "stage4-v3.4"   # v3.0 frontier; v3.1 time-expanded; v3.2 costs+wargaming; v3.3 alt-paths; v3.4 multi-modal-in-frontier
+MODEL_VERSION = "stage4-v3.5"   # v3.0 frontier; v3.1 time-expanded; v3.2 costs+wargaming; v3.3 alt-paths; v3.4 multimodal-in-frontier; v3.5 inducted-platform commitment
 DATA_SNAPSHOT_SEED = 42
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -341,6 +341,60 @@ NON_ROAD_WEATHER_CAPACITY_FRACTION = {
     7: 1.00, 8: 0.95, 9: 0.85, 10: 0.75, 11: 0.55, 12: 0.45,
 }
 # SYNTHETIC-INFERRED from general high-altitude operational windows.
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# v3.5 (Phase 3) — INDUCTED-PLATFORM COMMITMENT LAYER
+# ─────────────────────────────────────────────────────────────────────────────
+# The Army is ACTIVELY procuring two non-road platform families that the generic
+# mule/porter/air modes above only approximate:
+#   • PDS 15 (CPDS 2025): "IC Engine Based Logistic Drones for Super High
+#     Altitude Areas" — heavy-payload logistic drones, an ongoing ATB R&D line.
+#   • Robotic mules (PDS 15 2023, merged under ATB) — the Army has inducted
+#     ~100 quadruped/legged robotic mules for forward resupply.
+# Modelling them as NAMED PLATFORMS (not just abstract modes) lets the planner
+# answer the actual procurement question: "given the drones and robotic mules
+# you are buying, WHICH posts do you commit them to, on WHICH day, and HOW MANY
+# airframes/sections does that take?" The optimizer then emits a PLATFORM
+# COMMITMENT, not just tonnage.
+#
+# Each platform maps to ONE generic non-road mode for the underlying resolver
+# economics (so we never double-count capacity), but carries its own per-unit
+# payload and a fleet cap so commitment is expressed in airframes/sections.
+# ALL numbers are SYNTHETIC-INFERRED, anchored to public PDS text + open
+# reporting on the inducted systems; flagged on every emitted commitment row.
+INDUCTED_PLATFORMS = {
+    "logistic_drone": {
+        "maps_to_mode": "air_drop",          # shares air economics + DZ eligibility
+        "display_name": "IC-engine logistic drone (PDS 15)",
+        "payload_kg_per_unit": 40.0,         # per sortie per airframe (heavy-lift HA drone)
+        "sorties_per_unit_per_day": 4,       # turnarounds/day in the dispatch window
+        "fleet_units": 6,                    # airframes available to this formation
+        "cost_per_kg": 300.0,                # cheaper than manned air-drop, dearer than porter
+        "eligible_heads": ["Medical", "Ammunition", "Rations", "Clothing", "Engineer"],
+        "excluded_heads": ["POL"],           # bulk fuel not droned at this payload class
+        "weather_block_tmin_c": -30.0,       # IC-engine cold tolerance > rotary manned
+        "prefers_posts": "forward_or_air",   # commit to the hardest-to-reach first
+        "provenance": "synthetic-inferred",
+    },
+    "robotic_mule": {
+        "maps_to_mode": "mule_column",       # shares animal-column trail economics
+        "display_name": "Robotic mule section (PDS 15 / ATB induction)",
+        "payload_kg_per_unit": 120.0,        # per legged unit per trip (>animal mule)
+        "sorties_per_unit_per_day": 2,
+        "fleet_units": 20,                   # ~ inducted batch share for one brigade
+        "cost_per_kg": 90.0,                 # lower running cost than animal columns
+        "eligible_heads": ["Rations", "Ammunition", "Clothing", "Medical", "Engineer"],
+        "excluded_heads": ["POL"],
+        "weather_block_tmin_c": -25.0,
+        "prefers_posts": "trail",
+        "provenance": "synthetic-inferred",
+    },
+}
+# When True, the resolver prefers committing inducted platforms over the legacy
+# animal/manned modes for the heads/posts they cover (the Army wants its new
+# hardware used). Legacy modes still mop up what platforms cannot reach/carry.
+PREFER_INDUCTED_PLATFORMS = True
 
 
 # ─────────────────────────────────────────────────────────────────────────────

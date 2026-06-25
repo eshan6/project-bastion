@@ -594,7 +594,95 @@ def _resolve_non_road(b: Bundle, road_shortfalls: list, objective: str,
 
     nr_legs = []
     mode_summary = {}
+    platform_commitment = {}
     sortie_counter = 0  # for deterministic leg IDs
+
+    # ── Phase 3: commit INDUCTED PLATFORMS first (drones, robotic mules) ──────
+    # The Army wants its newly-procured hardware tasked to the hardest posts
+    # before falling back to animal/manned columns. Each platform fills the
+    # residual using its per-unit payload × fleet × turnarounds, tagged with the
+    # airframe/section count committed — that count is the procurement-relevant
+    # output. Legacy modes below then mop up what platforms cannot reach/carry.
+    if getattr(cfg, "PREFER_INDUCTED_PLATFORMS", False) and hasattr(cfg, "INDUCTED_PLATFORMS"):
+        for plat_name in sorted(cfg.INDUCTED_PLATFORMS,
+                                key=lambda p: cfg.INDUCTED_PLATFORMS[p]["cost_per_kg"]):
+            plat = cfg.INDUCTED_PLATFORMS[plat_name]
+            base_mode = modes.get(plat["maps_to_mode"], {})
+            eligibility = base_mode.get("eligible_posts", "all_non_depot")
+            elig_heads = set(plat.get("eligible_heads", []))
+            excl_heads = set(plat.get("excluded_heads", []))
+            unit_payload = plat["payload_kg_per_unit"]
+            per_unit_cap = unit_payload * plat["sorties_per_unit_per_day"] * weather_frac
+            fleet_cap_kg = per_unit_cap * plat["fleet_units"]
+            cost_per_kg = plat["cost_per_kg"]
+
+            fleet_kg_left = fleet_cap_kg
+            plat_kg = 0.0; plat_cost = 0.0; plat_posts = set()
+            # prefer the hardest posts first: air-eligible / lowest path availability
+            def _post_hardness(pid):
+                leg = b.legs.get(pid)
+                air = 1 if (leg and leg.has_air_resupply) else 0
+                pa = leg.path_availability if leg else 1.0
+                return (-air, pa, pid)   # air-DZ posts first, then most isolated
+            cand_posts = sorted({pk[0] for pk in residual}, key=_post_hardness)
+            for pid in cand_posts:
+                if fleet_kg_left <= 0:
+                    break
+                leg = b.legs.get(pid)
+                if eligibility == "air_resupply_only" and not (leg and leg.has_air_resupply):
+                    continue
+                cands = []
+                for (p, k), units in sorted(residual.items()):
+                    if p != pid or units <= 1e-6:
+                        continue
+                    head = b.sku_meta[k]["head"]
+                    if excl_heads and head in excl_heads:
+                        continue
+                    if elig_heads and head not in elig_heads:
+                        continue
+                    cands.append((k, units, b.sku_meta[k]["tier"], b.sku_weight_kg[k]))
+                cands.sort(key=lambda c: (c[2], -c[3]))
+                post_kg = 0.0
+                for k, units_avail, tier, wkg in cands:
+                    if fleet_kg_left <= 0:
+                        break
+                    max_units = (fleet_kg_left / wkg) if wkg > 0 else units_avail
+                    take = float(int(min(units_avail, max_units)))
+                    if take <= 0:
+                        continue
+                    take_kg = take * wkg
+                    nr_legs.append({
+                        "post_id": pid, "sku_id": k, "qty": take,
+                        "weight_kg": round(take_kg, 2),
+                        "transport_mode": plat["maps_to_mode"],
+                        "platform": plat_name,
+                        "platform_name": plat["display_name"],
+                        "cost_per_kg": cost_per_kg,
+                        "expected_cost": round(take_kg * cost_per_kg, 2),
+                        "depot_id": (leg.depot_id if leg else "?"),
+                        "axis": b.post_axis.get(pid, "?"),
+                        "head": b.sku_meta[k]["head"], "tier": tier,
+                        "provenance": plat.get("provenance", "synthetic-inferred"),
+                    })
+                    residual[(pid, k)] -= take
+                    fleet_kg_left -= take_kg
+                    plat_kg += take_kg; plat_cost += take_kg * cost_per_kg
+                    post_kg += take_kg; plat_posts.add(pid)
+            if plat_kg > 0:
+                # units committed = ceil(kg / per-unit daily capacity), capped at fleet
+                units_committed = min(plat["fleet_units"],
+                                      int(math.ceil(plat_kg / max(per_unit_cap, 1e-9))))
+                platform_commitment[plat_name] = {
+                    "display_name": plat["display_name"],
+                    "units_committed": units_committed,
+                    "fleet_units": plat["fleet_units"],
+                    "tonnes": round(plat_kg / 1000.0, 2),
+                    "cost": round(plat_cost, 2),
+                    "cost_per_kg": cost_per_kg,
+                    "posts_served": len(plat_posts),
+                    "weather_capacity_fraction": round(weather_frac, 2),
+                    "provenance": plat.get("provenance", "synthetic-inferred"),
+                }
 
     for mode_name in mode_order:
         mode = modes[mode_name]
@@ -711,7 +799,8 @@ def _resolve_non_road(b: Bundle, road_shortfalls: list, objective: str,
     resolved_kg = sum(l["weight_kg"] for l in nr_legs)
     return {"legs": nr_legs, "resolved_kg": resolved_kg,
             "remaining_shortfalls": sorted(remaining, key=lambda r: (r["post_id"], r["sku_id"])),
-            "mode_summary": mode_summary}
+            "mode_summary": mode_summary,
+            "platform_commitment": platform_commitment}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -926,6 +1015,7 @@ def _assemble(b: Bundle, objective: str, cluster_out: dict, alloc_all: dict,
             "solve_time_s": round(sum(r["solve_time_s"] for r in cluster_out.values()), 3),
             "legs": legs_out, "routes": routes_out,
             "non_road_legs": nr_legs, "non_road_summary": nr["mode_summary"],
+            "platform_commitment": nr.get("platform_commitment", {}),
             "shortfalls": final_shortfalls,
             "vehicles_used": len({l["vehicle_id"] for l in legs_out}),
             "posts_served": len({l["post_id"] for l in legs_out} | {l["post_id"] for l in nr_legs}),
