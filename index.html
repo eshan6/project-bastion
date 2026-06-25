@@ -226,7 +226,7 @@ function LineChart({history,asOf,projection}){
   </svg>;
 }
 
-function MapView({riskAll,passProb,go}){
+function MapView({riskAll,passProb,planLegs,day,go}){
   const ref=useRef(null),mapRef=useRef(null),loaded=useRef(false),markers=useRef([]);
   const goRef=useRef(go);goRef.current=go;
   const postStat=useMemo(()=>{
@@ -285,6 +285,11 @@ function MapView({riskAll,passProb,go}){
       map.addSource("routes",{type:"geojson",data:{type:"FeatureCollection",features:feats}});
       map.addLayer({id:"routes",type:"line",source:"routes",
         paint:{"line-width":1.4,"line-opacity":0.75,"line-color":["interpolate",["linear"],["get","worst"],0,"#ef4444",0.3,"#f97316",0.6,"#eab308",1,"#64748b"]}});
+      // plan-convoy layer (populated on demand from planLegs)
+      map.addSource("convoys",{type:"geojson",data:{type:"FeatureCollection",features:[]}});
+      map.addLayer({id:"convoys",type:"line",source:"convoys",
+        paint:{"line-color":"#2563eb","line-opacity":0.9,
+          "line-width":["interpolate",["linear"],["get","tons"],0,1.5,5,4,15,7]}});
       const b=new maplibregl.LngLatBounds();Object.values(P).forEach(p=>b.extend([p.lon,p.lat]));Object.values(SCAFFOLD.passes).forEach(c=>b.extend(c));
       map.fitBounds(b,{padding:48,maxZoom:8.5});
       loaded.current=true;place();
@@ -292,6 +297,22 @@ function MapView({riskAll,passProb,go}){
     mapRef.current=map;
   },[place]);
   useEffect(()=>{if(loaded.current)place();},[postStat,passProb,place]);
+  // draw the selected plan's convoys (depot→post), filtered by dispatch day
+  useEffect(()=>{
+    const map=mapRef.current;if(!map||!loaded.current||!map.getSource)return;
+    const src=map.getSource("convoys");if(!src)return;
+    const P=SCAFFOLD.posts;
+    const sel=(planLegs||[]).filter(l=>day==="all"||l.depart_day===day);
+    // aggregate tonnage per (depot→post) so one line per arc, width by load
+    const arc={};
+    sel.forEach(l=>{const k=l.depot_id+">"+l.post_id;
+      if(!P[l.depot_id]||!P[l.post_id])return;
+      arc[k]=arc[k]||{o:l.depot_id,d:l.post_id,kg:0};arc[k].kg+=(l.weight_kg||0);});
+    const feats=Object.values(arc).map(a=>({type:"Feature",
+      properties:{tons:(a.kg/1000)},
+      geometry:{type:"LineString",coordinates:[[P[a.o].lon,P[a.o].lat],[P[a.d].lon,P[a.d].lat]]}}));
+    src.setData({type:"FeatureCollection",features:feats});
+  },[planLegs,day]);
   return <div ref={ref} className="mapbox"/>;
 }
 
@@ -338,7 +359,7 @@ function App(){
        {route==="plans"&&<PlansScreen opt={opt} diag={diag} horizon={horizon} setHorizon={setHorizon} onReplan={()=>load(asOf,horizon)} busy={busy} go={go}/>}
        {route==="plan"&&<PlanDetail opt={opt} planId={sel.plan} asOf={asOf} go={go}/>}
        {route==="wargame"&&<WargameScreen asOf={asOf} opt={opt} go={go}/>}
-       {route==="map"&&<MapScreen riskAll={riskAll} passProb={passProb} go={go}/>}
+       {route==="map"&&<MapScreen riskAll={riskAll} passProb={passProb} opt={opt} go={go}/>}
        {route==="vehicles"&&<VehiclesScreen vehAll={vehAll} go={go}/>}
        {route==="vehicle"&&<VehicleDetail vehicle={sel.vehicle} vehAll={vehAll} go={go}/>}
        {route==="provenance"&&<Provenance diag={diag} snap={snap}/>}
@@ -445,12 +466,30 @@ function PlanDetail({opt,planId,asOf,go}){
     <PlanEditor baseLegs={myLegs} asOf={asOf}/>
   </>);
 }
-function MapScreen({riskAll,passProb,go}){
+function MapScreen({riskAll,passProb,opt,go}){
+  const plans=(opt&&opt.plans)||[];
+  const legs=(opt&&opt.legs)||[];
+  const [showPlan,setShowPlan]=useState(false);
+  const [planObj,setPlanObj]=useState("min_exposure");
+  const [day,setDay]=useState("all");   // "all" | 1 | 3 | 7 | 14
+  // available objectives present in this optimize response
+  const objs=Array.from(new Set(plans.map(p=>p.objective)));
+  const activePlan=plans.find(p=>p.objective===planObj)||plans.find(p=>p.objective==="full_coverage")||plans[0];
+  const planId=activePlan&&activePlan.plan_id;
+  const myLegs=showPlan&&planId?legs.filter(l=>l.plan_id===planId):[];
+  // dispatch days present in the chosen plan's legs
+  const days=Array.from(new Set(myLegs.map(l=>l.depart_day).filter(d=>d!=null))).sort((a,b)=>a-b);
   return (<>
-    <div className="page-head"><div className="page-title">Map</div><div className="page-sub">Forward posts and depots across Eastern Ladakh on satellite terrain, with the depot→post supply network. Red = at least one SKU at risk (14-day projection). Tap a marker to open the post.</div></div>
+    <div className="page-head"><div className="page-title">Map</div><div className="page-sub">Forward posts, depots, passes and the road network across Eastern Ladakh on a terrain basemap. Posts graded by stockout severity (green→amber→red by days of cover); passes and routes coloured by P(open). Toggle a resupply plan to draw its convoys, and scrub by dispatch day. Tap any marker for detail.</div></div>
+    <div className="controls" style={{marginBottom:12}}>
+      <label><input type="checkbox" checked={showPlan} onChange={e=>setShowPlan(e.target.checked)}/> Show resupply plan</label>
+      {showPlan&&objs.length>0&&<div className="seg">{objs.map(o=><button key={o} className={planObj===o?"on":""} onClick={()=>setPlanObj(o)}>{o.replace(/_/g," ")}</button>)}</div>}
+      {showPlan&&days.length>0&&<div className="seg"><button className={day==="all"?"on":""} onClick={()=>setDay("all")}>all days</button>{days.map(d=><button key={d} className={day===d?"on":""} onClick={()=>setDay(d)}>day {d}</button>)}</div>}
+      {showPlan&&activePlan&&<span style={{fontSize:12,color:"var(--ink-muted)"}}>{myLegs.filter(l=>day==="all"||l.depart_day===day).length} legs{day==="all"?"":" on day "+day} · {activePlan.objective.replace(/_/g," ")}</span>}
+    </div>
     <div className="card"><div className="card-body">
-      <MapView riskAll={riskAll} passProb={passProb} go={go}/>
-      <div className="legend"><span><i style={{background:"#16a34a"}}></i>Healthy</span><span><i style={{background:"#eab308"}}></i>Watch</span><span><i style={{background:"#f97316"}}></i>Warning</span><span><i style={{background:"#ef4444"}}></i>Critical</span><span><i style={{background:"#1e293b",borderRadius:2}}></i>Depot</span><span><i style={{background:"#16a34a",transform:"rotate(45deg)"}}></i>Pass (by P open)</span><span><i style={{background:"#64748b",width:14,height:2,borderRadius:0}}></i>Route (by P open)</span></div>
+      <MapView riskAll={riskAll} passProb={passProb} planLegs={myLegs} day={day} go={go}/>
+      <div className="legend"><span><i style={{background:"#16a34a"}}></i>Healthy</span><span><i style={{background:"#eab308"}}></i>Watch</span><span><i style={{background:"#f97316"}}></i>Warning</span><span><i style={{background:"#ef4444"}}></i>Critical</span><span><i style={{background:"#1e293b",borderRadius:2}}></i>Depot</span><span><i style={{background:"#16a34a",transform:"rotate(45deg)"}}></i>Pass (by P open)</span><span><i style={{background:"#64748b",width:14,height:2}}></i>Route (by P open)</span>{showPlan&&<span><i style={{background:"#2563eb",width:14,height:3}}></i>Plan convoy</span>}</div>
     </div></div>
   </>);
 }
