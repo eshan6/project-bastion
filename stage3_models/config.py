@@ -249,5 +249,19 @@ ALERT_HORIZONS = {
 # ─────────────────────────────────────────────────────────────────────────────
 # Model versioning
 # ─────────────────────────────────────────────────────────────────────────────
-MODEL_VERSION = "stage3-v1.1"   # v1.1 = vehicle scorer v2 (empirical axis multipliers, #1)
+MODEL_VERSION = "stage3-v1.2"   # v1.1 vehicle scorer v2; v1.2 wear-GLM scorer + spares-demand forecaster (PDS 5)
 DATA_SNAPSHOT_SEED = 42   # Stage 2 seed used to generate the training data
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# v1.2 (Phase 2) — SPARES-DEMAND FORECASTER (PDS 5: "Demand Forecast of Spares")
+# ─────────────────────────────────────────────────────────────────────────────
+# Horizons (days) for spare-part demand forecasts, per depot.
+SPARES_FORECAST_HORIZONS = [30, 60, 90]
+# Monte-Carlo trials for the P10/P50/P90 spares-demand quantiles. Each trial
+# samples, per vehicle homed at the depot, whether it fails in the horizon
+# (Bernoulli at the scorer's p_deadline scaled to the horizon), then samples the
+# parts consumed per failure from the empirical per-subsystem parts distribution
+# learned from spares_consumption. Deterministic via a fixed seed.
+SPARES_MC_TRIALS = 400
+SPARES_MC_SEED = 42

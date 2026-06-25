@@ -130,8 +130,61 @@ def fit_rate_model(vehicles: pd.DataFrame, vehicle_events: pd.DataFrame,
     inv_alpha = max(num / den, 1e-6)
     eb_alpha = 1.0 / inv_alpha
 
+    # ── v3.6 (Phase 2): learned WEAR multiplier from OBSERVABLE covariates ──
+    # A maintenance officer reads the logbook: heavily-used, forward-tasked,
+    # high-altitude-km, many-cold-start vehicles fail more WITHIN an axis. We
+    # fit a small Poisson GLM of per-vehicle train-window event count on
+    # standardized observable covariates (duty_intensity, band_mix_forward, and
+    # the vehicle's cum_altitude_km / cold_starts at train_end). This recovers
+    # the WITHIN-axis heterogeneity the axis multiplier cannot. Pure logbook
+    # regression — no generator constants read.
+    wear = {"coef": {}, "means": {}, "stds": {}, "intercept": 0.0, "enabled": False}
+    # STATIC logbook covariates only — known at induction for EVERY vehicle, no
+    # survivor bias. (Odometer covariates cum_altitude_km / cold_starts were
+    # tried and rejected: they only exist post-event, so using them biases the
+    # fit toward already-failed vehicles and HURT out-of-sample AUC.)
+    cov_cols = [c for c in ("duty_intensity", "band_mix_forward") if c in v.columns]
+    if cov_cols:
+        try:
+            import numpy as _np
+            X = v.set_index("vehicle_id")[cov_cols].astype(float)
+            means = X.mean(); stds = X.std().replace(0, 1.0)
+            Xs = ((X - means) / stds).values
+            y_cnt = k_full.reindex(X.index).fillna(0.0).values
+            expo = mu.reindex(X.index).fillna(mu.mean()).values  # exposure = axis/class rate*T
+            expo = _np.clip(expo, 1e-6, None)
+            # Poisson GLM via IRLS, offset = log(expo); ridge for stability
+            import numpy as np2
+            n, p = Xs.shape
+            Xd = np2.hstack([np2.ones((n, 1)), Xs])
+            beta = np2.zeros(p + 1)
+            for _ in range(40):
+                eta = Xd @ beta + np2.log(expo)
+                lam = np2.exp(np2.clip(eta, -20, 20))
+                W = lam
+                z = (Xd @ beta) + (y_cnt - lam) / np2.clip(W, 1e-9, None)
+                WX = Xd * W[:, None]
+                A = Xd.T @ WX + 1e-3 * np2.eye(p + 1)
+                b = Xd.T @ (W * z)
+                beta_new = np2.linalg.solve(A, b)
+                if np2.max(np2.abs(beta_new - beta)) < 1e-7:
+                    beta = beta_new; break
+                beta = beta_new
+            wear = {"enabled": True,
+                    "intercept": float(beta[0]),
+                    "coef": {c: float(beta[i + 1]) for i, c in enumerate(cov_cols)},
+                    "means": {c: float(means[c]) for c in cov_cols},
+                    "stds": {c: float(stds[c]) for c in cov_cols},
+                    "note": "Poisson GLM of per-vehicle train-window events on "
+                            "standardized observable covariates, offset=log(axis*class*T). "
+                            "Multiplier exp(intercept + coef.z) renormalised to mean 1 at score time."}
+        except Exception as _e:
+            wear = {"coef": {}, "means": {}, "stds": {}, "intercept": 0.0,
+                    "enabled": False, "error": str(_e)}
+
     return {"base_rate_per_vehicle_day": round(float(base_rate), 6),
             "eb_alpha": round(float(eb_alpha), 3),
+            "wear_glm": wear,
             "eb_note": "Gamma-Poisson empirical Bayes on per-vehicle residual rate; "
                        "posterior u_i = (alpha + k_365)/(alpha + r_i*365). Captures "
                        "persistent per-vehicle heterogeneity (the band-mix jitter) "
@@ -202,6 +255,22 @@ def score(vehicle_features: pd.DataFrame, posts: pd.DataFrame,
 
     rate_prior = base * df["axis_multiplier"] * df["class_multiplier"]
 
+    # v3.6: observable-wear multiplier (Poisson GLM on logbook covariates).
+    wear = card.get("wear_glm", {})
+    if wear.get("enabled"):
+        import numpy as _np
+        z = _np.zeros(len(df))
+        for c, coef in wear["coef"].items():
+            if c in df.columns:
+                mu_c = wear["means"].get(c, 0.0); sd_c = wear["stds"].get(c, 1.0) or 1.0
+                z = z + coef * ((df[c].astype(float).fillna(mu_c) - mu_c) / sd_c).values
+        wm = _np.exp(_np.clip(z, -3, 3))
+        wm = wm / wm.mean() if wm.mean() > 0 else wm   # renormalise to mean 1
+        df["wear_multiplier"] = wm
+        rate_prior = rate_prior * df["wear_multiplier"]
+    else:
+        df["wear_multiplier"] = 1.0
+
     # Empirical-Bayes update from the vehicle's own trailing-365d history
     alpha = card.get("eb_alpha", None)
     if alpha and "events_last_365d" in df.columns:
@@ -219,7 +288,7 @@ def score(vehicle_features: pd.DataFrame, posts: pd.DataFrame,
     out = df[["vehicle_id", "vehicle_class", "home_depot_id", "home_axis",
               "age_days_at_asof", "events_to_date",
               "axis_multiplier", "class_multiplier", "season_multiplier",
-              "eb_posterior_u"]].copy()
+              "wear_multiplier", "eb_posterior_u"]].copy()
     out["horizon_days"]      = horizon_days
     out["reliability_score"] = p_survive
     out["p_deadline"]        = p_deadline

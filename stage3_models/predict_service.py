@@ -26,6 +26,7 @@ import demand_forecast as demand
 import route_classifier as route
 import vehicle_reliability as vehicle
 import risk_scorer as risk
+import spares_forecast as spares
 
 
 def run_snapshot(snapshot_date: str | pd.Timestamp,
@@ -91,6 +92,22 @@ def run_snapshot(snapshot_date: str | pd.Timestamp,
     df_vehicles.to_parquet(p_veh, index=False)
     print(f"    {len(df_vehicles):,} vehicle scores → {p_veh.name}")
 
+    # ── Spares-demand forecast (PDS 5: "Demand Forecast of Spares") ──────────
+    # Composes the vehicle scores with the empirical parts-per-failure
+    # distribution into per-depot spare-part demand quantiles. New ontology
+    # object: spares_forecast.parquet.
+    if "spares_consumption" in data:
+        parts_fit = spares.fit_parts_distribution(data["spares_consumption"])
+        spares.save_forecaster_card(parts_fit)
+        df_spares = spares.forecast(df_vehicles, data["vehicles"], parts_fit)
+        for k, v in lineage.items():
+            df_spares[k] = v
+        p_spares = out_dir / "spares_forecast.parquet"
+        df_spares.to_parquet(p_spares, index=False)
+        print(f"    {len(df_spares):,} spares-demand rows → {p_spares.name}")
+    else:
+        print("    (spares_consumption absent — skipping spares forecast)")
+
     # ── Stockout risk (composed) ─────────────────────────────────────────────
     print("\n[4/4] Stockout risk composition...")
     # Find the most recent stock row at or before snap
@@ -118,6 +135,7 @@ def run_snapshot(snapshot_date: str | pd.Timestamp,
                                               "demand_forecasts": str(p_forecast.name),
                                               "route_predictions": str(p_route.name),
                                               "vehicle_reliability": str(p_veh.name),
+                                              "spares_forecast": "spares_forecast.parquet",
                                               "stockout_risk": str(p_risk.name),
                                           },
                                           "row_counts": {

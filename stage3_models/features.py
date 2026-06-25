@@ -35,7 +35,7 @@ def load_all():
     """Load every Stage 2 table. Returns dict of DataFrames."""
     tables = ["posts", "routes", "vehicles", "skus", "weather_daily", "wd_events",
               "pass_closures", "pass_status_daily", "consumption_daily",
-              "tempo_daily", "vehicle_events", "stock_daily"]
+              "tempo_daily", "vehicle_events", "stock_daily", "spares_consumption"]
     return {t: _load(t) for t in tables}
 
 
@@ -259,7 +259,20 @@ def build_vehicle_features(data: dict, as_of_date: str | pd.Timestamp) -> pd.Dat
     recent = past[past["deadline_date"] > as_of - pd.Timedelta(days=365)]
     by_v = by_v.join(recent.groupby("vehicle_id").size().rename("events_last_365d"))
 
+    # v3.6 (Phase 2): observable wear odometers at as_of — the reading on the
+    # vehicle's last logged event before the snapshot (the generator writes
+    # cum_altitude_km / cold_starts onto every event). Vehicles with no event
+    # yet read 0; this is exactly what a maintenance officer sees on the card.
+    if {"cum_altitude_km", "cold_starts"}.issubset(past.columns) and len(past):
+        last_idx = past.sort_values("deadline_date").groupby("vehicle_id").tail(1)
+        odo = last_idx.set_index("vehicle_id")[["cum_altitude_km", "cold_starts"]]
+        by_v = by_v.join(odo)
+
     veh = veh.merge(by_v, left_on="vehicle_id", right_index=True, how="left")
+    for c in ("cum_altitude_km", "cold_starts"):
+        if c not in veh.columns:
+            veh[c] = 0.0
+        veh[c] = veh[c].fillna(0.0)
     veh["events_to_date"] = veh["events_to_date"].fillna(0).astype(int)
     veh["events_last_365d"] = veh["events_last_365d"].fillna(0).astype(int)
 
