@@ -1,0 +1,14 @@
+# Project Bastion — pinned dependency set (v3)
+# Pinned exactly, not floored: an unpinned build on 2026-07-05 resolved a
+# different library universe than the one the code was validated on, making
+# every Space build a dice roll. These exact versions are validated end-to-end
+# (Stage 2 generate -> Stage 3 train -> full tick incl. OR-Tools optimizer).
+# Deploy determinism now matches data determinism (seed 42).
+fastapi==0.139.0
+uvicorn==0.50.0
+pandas==3.0.3
+numpy==2.5.1
+pyarrow==24.0.0
+xgboost==3.3.0
+scikit-learn==1.9.0
+ortools==9.15.6755
