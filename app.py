@@ -301,7 +301,14 @@ def series(post: str, sku: str):
 # ─────────────────────────────────────────────────────────────────────────────
 @app.get("/health")
 def health():
-    return {"ok": _status["boot"] == "ready", **_status}
+    # BUILD_COMMIT is written by the Dockerfile at image-build time (the short
+    # hash of the v3 commit that was cloned). Its PRESENCE proves the container
+    # was built by the current clone-from-GitHub Dockerfile; its VALUE says
+    # exactly which commit is serving. This exists because a stray Space-local
+    # app.py once shadowed the cloned repo for multiple sessions undetected.
+    bc = ROOT / "BUILD_COMMIT"
+    commit = bc.read_text().strip() if bc.exists() else None
+    return {"ok": _status["boot"] == "ready", "build_commit": commit, **_status}
 
 
 @app.get("/sim")
